@@ -115,10 +115,35 @@ func _rebuild() -> void:
 			continue
 		if kind_sel != "All" and a.get("kind", "") != kind_sel:
 			continue
-		_grid.add_child(A2GUI.asset_card(a.get("name", "?"), a.get("kind", "?"),
-			a.get("provider", "?"), a.get("path", ""), _icon))
+		var card := A2GUI.asset_card(a.get("name", "?"), a.get("kind", "?"),
+			a.get("provider", "?"), a.get("path", ""), _icon)
+		_grid.add_child(card)
+		_queue_preview(a.get("path", ""), card)
 		shown += 1
 	_empty.visible = shown == 0
+
+
+## Real previews work only for resources inside res:// — indexed files
+## under the project dir (e.g. res://bk_assets) qualify too.
+func _queue_preview(path: String, card: Control) -> void:
+	var previewer := EditorInterface.get_resource_previewer()
+	if previewer == null:
+		return
+	var res_path := ""
+	if path.begins_with("res://"):
+		res_path = path
+	else:
+		var proj := ProjectSettings.globalize_path("res://")
+		if path.begins_with(proj):
+			res_path = "res://" + path.substr(proj.length())
+	if res_path != "":
+		previewer.queue_resource_preview(res_path, self, "_on_preview", card)
+
+
+func _on_preview(_path: String, preview: Texture2D, thumbnail_preview: Texture2D, card) -> void:
+	var tex: Texture2D = thumbnail_preview if thumbnail_preview else preview
+	if tex:
+		A2GUI.set_card_thumb(card, tex)
 
 
 ## Rebuilds the filter dropdowns from the result set, preserving selections.

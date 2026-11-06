@@ -182,7 +182,7 @@ func init_gallery() -> void:
 	main_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var scene_assets := A2GSceneAssets.new()
 	scene_assets.plugin = self
-	scene_assets.name = "Scene Assets"
+	scene_assets.name = "Assets"
 	main_tabs.add_child(scene_assets)
 	var a2g := HSplitContainer.new()
 	a2g.name = "Assets2Godot"
