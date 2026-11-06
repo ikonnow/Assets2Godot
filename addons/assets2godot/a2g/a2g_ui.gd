@@ -72,12 +72,126 @@ const GalleryItemScript = preload("res://addons/assets2godot/ui/gallery/gallery_
 
 ## The identical tile the BlendKit gallery uses — a real GalleryItem scene
 ## instance configured for a local/indexed asset via setup_a2g(), so every
-## A2G surface is pixel-identical by construction.
-static func asset_card(title: String, kind: String, source: String, path: String, _icon: Texture2D, type_name: String = "") -> Control:
+## A2G surface is pixel-identical by construction. `extra` adds context
+## for the right-click menu ("res", "node", "ext").
+static func asset_card(title: String, kind: String, source: String, path: String, _icon: Texture2D, type_name: String = "", extra: Dictionary = {}) -> Control:
 	var item: Control = GALLERY_ITEM.instantiate()
-	item.setup_a2g(title, kind, type_name, "%s\n%s · %s\n%s" % [title, kind, source, short_path(path)],
-		{"path": path, "kind": kind, "source": source})
+	var payload := {"path": path, "kind": kind, "source": source}
+	payload.merge(extra)
+	item.setup_a2g(title, kind, type_name, "%s\n%s · %s\n%s" % [title, kind, source, short_path(path)], payload)
+	item.gui_input.connect(func(ev): _on_card_gui_input(item, ev))
 	return item
+
+
+## MARK: asset context menu — right-click actions mirroring the Godot
+## FileSystem dock and Scene dock menus, driven by the same engine calls
+## upstream uses internally (navigate_to_path, edit_resource,
+## open_scene_from_path, edit_node, reimport_files, clipboard_set,
+## shell_show_in_file_manager).
+enum AssetMenu { SHOW_FS, OPEN, EDIT_RES, SELECT_NODE, COPY_NODE_PATH, REIMPORT, SHOW_FM, COPY_PATH }
+
+
+static func _on_card_gui_input(item: Control, ev: InputEvent) -> void:
+	var mb := ev as InputEventMouseButton
+	if mb and mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+		var asset: Dictionary = item.get("asset")
+		asset_context_menu(asset.get("a2g_payload", {}), item)
+		item.accept_event()
+
+
+## Builds a throwaway PopupMenu next to the card — freed on hide, so no
+## stale entries survive a rebuild.
+static func asset_context_menu(entry: Dictionary, card: Control) -> void:
+	var menu := PopupMenu.new()
+	card.add_child(menu)
+	var path := str(entry.get("path", ""))
+	var is_res_file := path.begins_with("res://")
+	var is_os_file := path != "" and (is_res_file or FileAccess.file_exists(path))
+	var res: Resource = entry.get("res")
+	var node: Node = entry.get("node")
+	var has_res := res != null and is_instance_valid(res)
+	var has_node := node != null and is_instance_valid(node)
+
+	if is_res_file:
+		menu.add_icon_item(_menu_icon("ShowInFileSystem"), "Show in FileSystem", AssetMenu.SHOW_FS)
+		menu.add_icon_item(_menu_icon("Load"), "Open", AssetMenu.OPEN)
+		menu.add_icon_item(_menu_icon("Reload"), "Reimport", AssetMenu.REIMPORT)
+	if has_res:
+		if menu.item_count:
+			menu.add_separator()
+		menu.add_icon_item(_menu_icon("Edit"), "Edit Resource", AssetMenu.EDIT_RES)
+	if has_node:
+		if menu.item_count:
+			menu.add_separator()
+		menu.add_icon_item(_menu_icon("Edit"), "Select Node in Scene", AssetMenu.SELECT_NODE)
+		menu.add_icon_item(_menu_icon("ActionCopy"), "Copy Node Path", AssetMenu.COPY_NODE_PATH)
+	if is_os_file:
+		if menu.item_count:
+			menu.add_separator()
+		menu.add_icon_item(_menu_icon("Folder"), "Show in File Manager", AssetMenu.SHOW_FM)
+		menu.add_icon_item(_menu_icon("ActionCopy"), "Copy Path", AssetMenu.COPY_PATH)
+
+	if menu.item_count == 0:
+		menu.free()
+		return
+	menu.id_pressed.connect(func(id): _on_asset_menu(id, entry))
+	menu.popup_hide.connect(menu.queue_free)
+	menu.popup(Rect2(card.get_global_mouse_position(), Vector2.ZERO))
+
+
+## Editor-icons for menu items — the same icon names Godot's own docks use,
+## resolved defensively (missing name = no icon, not a crash).
+static func _menu_icon(icon_name: StringName) -> Texture2D:
+	var theme := EditorInterface.get_editor_theme()
+	if theme and theme.has_icon(icon_name, &"EditorIcons"):
+		return theme.get_icon(icon_name, &"EditorIcons")
+	return null
+
+
+static func _on_asset_menu(id: int, entry: Dictionary) -> void:
+	var path := str(entry.get("path", ""))
+	match id:
+		AssetMenu.SHOW_FS:
+			EditorInterface.get_file_system_dock().navigate_to_path(path)
+		AssetMenu.OPEN:
+			_open_entry(entry)
+		AssetMenu.EDIT_RES:
+			var res: Resource = entry.get("res")
+			if res != null and is_instance_valid(res):
+				EditorInterface.edit_resource(res)
+		AssetMenu.SELECT_NODE:
+			var node: Node = entry.get("node")
+			if node != null and is_instance_valid(node):
+				EditorInterface.get_selection().clear()
+				EditorInterface.get_selection().add_node(node)
+				EditorInterface.edit_node(node)
+		AssetMenu.COPY_NODE_PATH:
+			var node: Node = entry.get("node")
+			if node != null and is_instance_valid(node):
+				DisplayServer.clipboard_set(str(node.get_path()))
+		AssetMenu.REIMPORT:
+			EditorInterface.get_resource_filesystem().reimport_files([path])
+		AssetMenu.SHOW_FM:
+			OS.shell_show_in_file_manager(ProjectSettings.globalize_path(path) if path.begins_with("res://") else path)
+		AssetMenu.COPY_PATH:
+			DisplayServer.clipboard_set(path)
+
+
+## "Open" dispatches like the FileSystem dock's default action: scenes open
+## as scenes, scripts go to the script editor, resources to the inspector.
+static func _open_entry(entry: Dictionary) -> void:
+	var path := str(entry.get("path", ""))
+	var ext := str(entry.get("ext", path.get_extension())).to_lower()
+	if ext in ["tscn", "scn"]:
+		EditorInterface.open_scene_from_path(path)
+		return
+	var res := load(path)
+	if res == null:
+		EditorInterface.get_file_system_dock().navigate_to_path(path)
+	elif res is Script:
+		EditorInterface.edit_script(res)
+	else:
+		EditorInterface.edit_resource(res)
 
 
 ## Sets the real preview texture on a card built by asset_card().

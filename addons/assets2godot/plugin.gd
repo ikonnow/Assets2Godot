@@ -34,6 +34,7 @@ const gallery_scene = preload("res://addons/assets2godot/ui/gallery/gallery.tscn
 const A2GDock = preload("res://addons/assets2godot/a2g/a2g_dock.gd")
 const A2GBrowser = preload("res://addons/assets2godot/a2g/a2g_browser.gd")
 const A2GSceneAssets = preload("res://addons/assets2godot/a2g/a2g_scene_assets.gd")
+const A2GContextPlugin = preload("res://addons/assets2godot/a2g/a2g_context_plugin.gd")
 const Auth = preload("res://addons/assets2godot/auth.gd")
 const BlenderImport = preload("res://addons/assets2godot/blender_import.gd")
 const ClientBinary = preload("res://addons/assets2godot/client_binary.gd")
@@ -111,6 +112,8 @@ var gallery: Control
 ## The A2G main-screen tab content: BlendKit gallery + A2G browser +
 ## Local Assets management as inner tabs.
 var main_tabs: TabContainer
+var _ctx_fs: EditorContextMenuPlugin
+var _ctx_scene: EditorContextMenuPlugin
 
 
 func _enter_tree() -> void:
@@ -141,6 +144,12 @@ func _enter_tree() -> void:
 func _exit_tree() -> void:
 	ProjectSettings.settings_changed.disconnect(load_settings)
 	EditorInterface.get_editor_settings().settings_changed.disconnect(load_settings)
+	if _ctx_fs:
+		remove_context_menu_plugin(_ctx_fs)
+		_ctx_fs = null
+	if _ctx_scene:
+		remove_context_menu_plugin(_ctx_scene)
+		_ctx_scene = null
 	# The children go with the plugin; the tabs live in the main screen.
 	if main_tabs:
 		main_tabs.queue_free()
@@ -195,6 +204,14 @@ func init_gallery() -> void:
 	browser.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	a2g.add_child(browser)
 	main_tabs.add_child(a2g)
+	# A2G entries inside Godot's own context menus — FileSystem dock
+	# ("Scan folder as root") and Scene tree ("Show scene resources").
+	_ctx_fs = A2GContextPlugin.new(EditorContextMenuPlugin.CONTEXT_SLOT_FILESYSTEM)
+	_ctx_fs.add_scan_root.connect(local.add_scan_root)
+	add_context_menu_plugin(EditorContextMenuPlugin.CONTEXT_SLOT_FILESYSTEM, _ctx_fs)
+	_ctx_scene = A2GContextPlugin.new(EditorContextMenuPlugin.CONTEXT_SLOT_SCENE_TREE)
+	_ctx_scene.browse_scene_resources.connect(func(): main_tabs.current_tab = 0)
+	add_context_menu_plugin(EditorContextMenuPlugin.CONTEXT_SLOT_SCENE_TREE, _ctx_scene)
 	gallery = gallery_scene.instantiate()
 	gallery.plugin = self
 	gallery.name = "BlendKit"

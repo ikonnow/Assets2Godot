@@ -221,6 +221,12 @@ func _on_add() -> void:
 	_dir_dialog.popup_centered_ratio(0.5)
 
 
+## Public entry point for the FileSystem context menu's "A2G: Scan folder
+## as root" — same flow as picking the directory in the Add dialog.
+func add_scan_root(dir: String) -> void:
+	_on_dir_selected(dir)
+
+
 func _on_dir_selected(dir: String) -> void:
 	_fetch("providers/local_dir/roots", func(st):
 		if not (st is Dictionary):
