@@ -120,8 +120,9 @@ static func asset_context_menu(entry: Dictionary, card: Control) -> void:
 	var has_node := node != null and is_instance_valid(node)
 
 	if is_res_file:
-		menu.add_icon_item(_menu_icon("ShowInFileSystem"), "Show in FileSystem", AssetMenu.SHOW_FS)
+		# Upstream filesystem_dock order: Open first, then the file ops.
 		menu.add_icon_item(_menu_icon("Load"), "Open", AssetMenu.OPEN)
+		menu.add_icon_item(_menu_icon("ShowInFileSystem"), "Show in FileSystem", AssetMenu.SHOW_FS)
 		menu.add_icon_item(_menu_icon("Reload"), "Reimport", AssetMenu.REIMPORT)
 	elif is_os_file:
 		# External files can be staged into the project — same intent as
@@ -150,7 +151,12 @@ static func asset_context_menu(entry: Dictionary, card: Control) -> void:
 		return
 	menu.id_pressed.connect(func(id): _on_asset_menu(id, entry))
 	menu.popup_hide.connect(menu.queue_free)
-	menu.popup(Rect2(card.get_global_mouse_position(), Vector2.ZERO))
+	# Editor-source popup formula (filesystem_dock/scene_tree_dock):
+	# screen pos of the control + mouse pos inside it — NOT
+	# get_global_mouse_position(), which is viewport/canvas space and
+	# lands displaced whenever the popup is a native window.
+	menu.position = card.get_screen_position() + card.get_local_mouse_position()
+	menu.popup()
 
 
 ## Editor-icons for menu items — the same icon names Godot's own docks use,

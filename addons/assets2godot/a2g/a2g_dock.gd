@@ -73,8 +73,11 @@ func _ready() -> void:
 	_tree = Tree.new()
 	_tree.hide_root = true
 	_tree.scroll_horizontal_enabled = true
+	_tree.allow_rmb_select = true
 	_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_tree.item_selected.connect(_update_state)
+	_tree.item_mouse_selected.connect(_on_tree_rmb)
+	_tree.empty_clicked.connect(_on_tree_empty_rmb)
 	vbox.add_child(_tree)
 
 	_dir_dialog = EditorFileDialog.new()
@@ -174,6 +177,8 @@ func _on_refresh() -> void:
 			item.set_text(0, "%s (%s)" % [p.get("name", "?"), p.get("kind", "?")])
 			item.set_icon(0, _icon("HTTPRequest" if str(p.get("kind", "")) == "remote" else "Folder"))
 			item.set_icon_max_width(0, _icon_size())
+			item.set_meta("provider_row", true)
+			item.set_meta("provider_row_name", str(p.get("name", "")))
 			_provider_items[p.get("name", "")] = item
 		# blenderkit is remote; its endpoints are the client's own /assets/*.
 		for pname in ["fab_vault", "local_dir"]:
@@ -267,32 +272,116 @@ func _on_scan() -> void:
 	var pending := [0]
 	for pname in ["fab_vault", "local_dir"]:
 		pending[0] += 1
-		_fetch("providers/%s/scan" % pname, func(st):
-			if st is Dictionary:
-				# Scan results nest under their provider row — the tree
-				# stays an outliner of sources, not a flat log.
-				var parent: TreeItem = _provider_items.get(pname)
-				if parent == null:
-					parent = _tree.get_root()
-				if parent != null:
-					var item := _tree.create_item(parent)
-					var sum: Dictionary = st.get("scanned", {})
-					item.set_text(0, "scan — %d files indexed" % int(sum.get("files", 0)))
-					item.set_icon(0, _icon("Search"))
-					item.set_icon_max_width(0, _icon_size())
-					for r in sum.get("roots", []):
-						var c := _tree.create_item(item)
-						if r.get("skipped", false):
-							c.set_text(0, str(r.get("path", "")))
-							c.set_icon(0, _icon("StatusError"))
-						else:
-							c.set_text(0, "%s — %d indexed" % [r.get("path", ""), int(r.get("indexed", 0))])
-							c.set_icon(0, _icon("Folder"))
-						c.set_icon_max_width(0, _icon_size())
-			pending[0] -= 1
-			if pending[0] == 0:
-				_scan.disabled = not (plugin.connection and plugin.connection.is_client_connected())
-				scanned.emit())
+		_scan_provider(pname, pending)
+
+
+## One provider scan; shared by the Scan button (all providers, pending
+## counter) and the tree's per-row "Scan" menu item.
+func _scan_provider(pname: String, pending: Array) -> void:
+	_fetch("providers/%s/scan" % pname, func(st):
+		if st is Dictionary:
+			# Scan results nest under their provider row — the tree
+			# stays an outliner of sources, not a flat log.
+			var parent: TreeItem = _provider_items.get(pname)
+			if parent == null:
+				parent = _tree.get_root()
+			if parent != null:
+				var item := _tree.create_item(parent)
+				var sum: Dictionary = st.get("scanned", {})
+				item.set_text(0, "scan — %d files indexed" % int(sum.get("files", 0)))
+				item.set_icon(0, _icon("Search"))
+				item.set_icon_max_width(0, _icon_size())
+				for r in sum.get("roots", []):
+					var c := _tree.create_item(item)
+					if r.get("skipped", false):
+						c.set_text(0, str(r.get("path", "")))
+						c.set_icon(0, _icon("StatusError"))
+					else:
+						c.set_text(0, "%s — %d indexed" % [r.get("path", ""), int(r.get("indexed", 0))])
+						c.set_icon(0, _icon("Folder"))
+					c.set_icon_max_width(0, _icon_size())
+		pending[0] -= 1
+		if pending[0] == 0:
+			_scan.disabled = not (plugin.connection and plugin.connection.is_client_connected())
+			scanned.emit())
+
+
+# MARK: sources tree context menu — mirrors filesystem_dock's
+# _tree_rmb_select: right-click selects the row, then a PopupMenu opens
+# at get_screen_position() + local position (the editor-source formula,
+# see docs/research/editor_ui_parity.md).
+enum DockMenu { ADOPT, REMOVE_ROOT, SHOW_FM, COPY_PATH, SCAN_PROVIDER, REFRESH, ADD_FOLDER }
+
+
+func _on_tree_rmb(pos: Vector2, button: int) -> void:
+	if button != MOUSE_BUTTON_RIGHT:
+		return
+	var menu := PopupMenu.new()
+	add_child(menu)
+	var sel = _selected_root()
+	if sel != null:
+		if sel.get("candidate", false):
+			menu.add_icon_item(_icon("Add"), "Adopt as scan root", DockMenu.ADOPT)
+		else:
+			menu.add_icon_item(_icon("Remove"), "Remove root", DockMenu.REMOVE_ROOT)
+		menu.add_icon_item(_icon("Folder"), "Show in File Manager", DockMenu.SHOW_FM)
+		menu.add_icon_item(_icon("ActionCopy"), "Copy Path", DockMenu.COPY_PATH)
+		menu.add_separator()
+		menu.add_icon_item(_icon("Play"), "Scan " + str(sel["provider"]), DockMenu.SCAN_PROVIDER)
+	elif _tree.get_selected() != null and _tree.get_selected().has_meta("provider_row") \
+			and _tree.get_selected().get_meta("provider_row") == true:
+		var pname: String = _tree.get_selected().get_meta("provider_row_name", "")
+		menu.add_icon_item(_icon("Reload"), "Refresh", DockMenu.REFRESH)
+		if pname in ["fab_vault", "local_dir"]:
+			menu.add_icon_item(_icon("Play"), "Scan " + pname, DockMenu.SCAN_PROVIDER)
+	else:
+		menu.add_icon_item(_icon("Add"), "Add folder…", DockMenu.ADD_FOLDER)
+		menu.add_icon_item(_icon("Reload"), "Refresh", DockMenu.REFRESH)
+	menu.id_pressed.connect(func(id): _on_dock_menu(id))
+	menu.popup_hide.connect(menu.queue_free)
+	menu.position = _tree.get_screen_position() + pos
+	menu.popup()
+
+
+## Right-click on empty tree space — same generic menu as unhandled rows.
+func _on_tree_empty_rmb(pos: Vector2, button: int) -> void:
+	if button != MOUSE_BUTTON_RIGHT:
+		return
+	var menu := PopupMenu.new()
+	add_child(menu)
+	menu.add_icon_item(_icon("Add"), "Add folder…", DockMenu.ADD_FOLDER)
+	menu.add_icon_item(_icon("Reload"), "Refresh", DockMenu.REFRESH)
+	menu.id_pressed.connect(func(id): _on_dock_menu(id))
+	menu.popup_hide.connect(menu.queue_free)
+	menu.position = _tree.get_screen_position() + pos
+	menu.popup()
+
+
+func _on_dock_menu(id: int) -> void:
+	match id:
+		DockMenu.ADOPT, DockMenu.REMOVE_ROOT:
+			_on_remove()
+		DockMenu.SHOW_FM:
+			var sel = _selected_root()
+			if sel != null:
+				OS.shell_show_in_file_manager(sel["root"])
+		DockMenu.COPY_PATH:
+			var sel = _selected_root()
+			if sel != null:
+				DisplayServer.clipboard_set(str(sel["root"]))
+		DockMenu.SCAN_PROVIDER:
+			var sel = _selected_root()
+			var pname := ""
+			if sel != null:
+				pname = sel["provider"]
+			elif _tree.get_selected() != null and _tree.get_selected().has_meta("provider_row_name"):
+				pname = _tree.get_selected().get_meta("provider_row_name", "")
+			if pname != "":
+				_scan_provider(pname, [1])
+		DockMenu.REFRESH:
+			_on_refresh()
+		DockMenu.ADD_FOLDER:
+			_on_add()
 
 
 func _on_add() -> void:
