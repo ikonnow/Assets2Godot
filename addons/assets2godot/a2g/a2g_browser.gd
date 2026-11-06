@@ -10,8 +10,8 @@ const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
 const A2GThumbs = preload("res://addons/assets2godot/a2g/a2g_thumbs.gd")
 const SEARCH_LIMIT = 500
 
-## assets2godot/browser_view editor setting: 0 = tile grid, 1 = list.
-const SETTING_VIEW := "assets2godot/browser_view"
+## assets2godot/browser_display_mode editor setting: 0 = thumbnails, 1 = list.
+const SETTING_VIEW := "assets2godot/browser_display_mode"
 enum View { GRID, LIST }
 
 ## Kind → EditorIcons name for the list view's rows — same names the
@@ -59,8 +59,20 @@ func _ready() -> void:
 	_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_search.text_submitted.connect(func(_q): _reload())
 	search_row.add_child(_search)
+	# Provider/kind filters inline — the native file panel keeps a single
+	# toolbar row (nav, path, filter, mode buttons).
+	_provider_filter = OptionButton.new()
+	_provider_filter.tooltip_text = "Filter by provider."
+	_provider_filter.item_selected.connect(func(_i): _rebuild())
+	search_row.add_child(_provider_filter)
+	_kind_filter = OptionButton.new()
+	_kind_filter.tooltip_text = "Filter by asset kind."
+	_kind_filter.item_selected.connect(func(_i): _rebuild())
+	search_row.add_child(_kind_filter)
 	_refresh = Button.new()
-	_refresh.text = "Refresh"
+	_refresh.icon = _editor_icon("Reload")
+	if _refresh.icon == null:
+		_refresh.text = "Refresh"
 	_refresh.tooltip_text = "Reload the index."
 	_refresh.theme_type_variation = "FlatButton"
 	_refresh.pressed.connect(_reload)
@@ -81,22 +93,6 @@ func _ready() -> void:
 	_split_btn.pressed.connect(_toggle_split)
 	search_row.add_child(_split_btn)
 	_update_split_icon()
-
-	# Filter row.
-	var filter_row := HFlowContainer.new()
-	vbox.add_child(filter_row)
-	var pl := Label.new()
-	pl.text = "Provider:"
-	filter_row.add_child(pl)
-	_provider_filter = OptionButton.new()
-	_provider_filter.item_selected.connect(func(_i): _rebuild())
-	filter_row.add_child(_provider_filter)
-	var kl := Label.new()
-	kl.text = "  Kind:"
-	filter_row.add_child(kl)
-	_kind_filter = OptionButton.new()
-	_kind_filter.item_selected.connect(func(_i): _rebuild())
-	filter_row.add_child(_kind_filter)
 
 	# The FileSystem dock's file panel: one ItemListSecondary whose
 	# icon_mode switches between the dock's two display modes —
