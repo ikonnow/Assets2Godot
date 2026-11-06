@@ -192,6 +192,7 @@ func _collect_resource(res: Resource, node: Node, prop: String, depth: int) -> v
 		"source": "scene",
 		"path": "%s:%s" % [node.get_path(), prop],
 		"res": res,
+		"node": node,
 	})
 	for sub in res.get_property_list():
 		if sub.get("type") != TYPE_OBJECT or not (sub.get("usage", 0) & PROPERTY_USAGE_STORAGE):
@@ -222,7 +223,8 @@ func _rebuild() -> void:
 			continue
 		if q != "" and not (str(a["name"]).to_lower().contains(q) or str(a["path"]).to_lower().contains(q)):
 			continue
-		var card := A2GUI.asset_card(a["name"], a["kind"], a["source"], a["path"], _icon, a["type"])
+		var card := A2GUI.asset_card(a["name"], a["kind"], a["source"], a["path"], _icon, a["type"],
+			{"res": a["res"], "node": a.get("node"), "ext": a["ext"]})
 		_grid.add_child(card)
 		_request_preview(a, card)
 		shown += 1

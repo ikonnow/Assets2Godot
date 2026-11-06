@@ -121,7 +121,8 @@ func _rebuild() -> void:
 		if kind_sel != "All" and a.get("kind", "") != kind_sel:
 			continue
 		var card := A2GUI.asset_card(a.get("name", "?"), a.get("kind", "?"),
-			a.get("provider", "?"), a.get("path", ""), _icon)
+			a.get("provider", "?"), a.get("path", ""), _icon, "",
+			{"ext": str(a.get("path", "")).get_extension().to_lower()})
 		_grid.add_child(card)
 		_queue_preview(a.get("path", ""), card)
 		shown += 1
