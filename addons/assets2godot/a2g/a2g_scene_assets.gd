@@ -320,6 +320,8 @@ func _request_preview(a: Dictionary, card: Control) -> void:
 
 
 func _on_preview(_path: String, preview: Texture2D, thumbnail_preview: Texture2D, card) -> void:
+	if not is_instance_valid(card):
+		return
 	var tex: Texture2D = preview if preview else thumbnail_preview
 	if tex:
 		A2GUI.set_card_thumb(card, tex)

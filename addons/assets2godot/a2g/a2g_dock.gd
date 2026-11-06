@@ -112,12 +112,11 @@ func _update_state() -> void:
 ## selection is not a removable root row.
 func _selected_root() -> Variant:
 	var item := _tree.get_selected()
-	if item == null:
-		return null
-	if item.get_meta("provider") == null or item.get_meta("root") == null:
+	# TreeItem.get_meta errors on absent keys — has_meta first, always.
+	if item == null or not item.has_meta("provider") or not item.has_meta("root"):
 		return null
 	return {"provider": item.get_meta("provider"), "root": item.get_meta("root"),
-		"candidate": item.get_meta("candidate") == true}
+		"candidate": item.has_meta("candidate") and item.get_meta("candidate") == true}
 
 
 ## Fires a GET for [param endpoint] and calls [param cb] with the decoded JSON
