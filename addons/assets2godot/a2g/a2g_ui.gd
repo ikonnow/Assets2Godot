@@ -26,6 +26,30 @@ static func kind_for(file_name: String) -> String:
 	return KIND_BY_EXT.get(file_name.get_extension().to_lower(), "")
 
 
+## Like kind_for() but never returns "": every file is listed, unknown
+## extensions become their own kind, extensionless files become "file".
+static func kind_for_file(file_name: String) -> String:
+	var ext := file_name.get_extension().to_lower()
+	return KIND_BY_EXT.get(ext, ext if ext != "" else "file")
+
+
+## Asset kind for an in-memory Resource (e.g. from the open scene):
+## meshes read as "model", materials/textures by class, rest "resource".
+static func kind_for_resource(res: Resource) -> String:
+	var c := res.get_class().to_lower()
+	if "mesh" in c:
+		return "model"
+	if "material" in c or "shader" in c:
+		return "material"
+	if "texture" in c or "image" in c:
+		return "texture"
+	if "animation" in c:
+		return "animation"
+	if "script" in c or "scene" in c:
+		return "scene_data"
+	return "resource"
+
+
 static func kind_color(kind: String) -> Color:
 	match kind:
 		"model": return Color(0.22, 0.35, 0.55, 0.85)
@@ -34,6 +58,9 @@ static func kind_color(kind: String) -> Color:
 		"material": return Color(0.45, 0.3, 0.55, 0.85)
 		"ue_asset": return Color(0.3, 0.3, 0.32, 0.9)
 		"scene_data": return Color(0.35, 0.45, 0.55, 0.85)
+		"resource": return Color(0.4, 0.4, 0.45, 0.85)
+		"animation": return Color(0.55, 0.35, 0.35, 0.85)
+		"file": return Color(0.32, 0.32, 0.34, 0.8)
 		"metadata": return Color(0.35, 0.35, 0.4, 0.7)
 		_: return Color(0.3, 0.3, 0.34, 0.8)
 
