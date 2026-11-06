@@ -16,7 +16,8 @@ var plugin: EditorPlugin
 var _search: LineEdit
 var _include: OptionButton
 var _refresh: Button
-var _grid: HFlowContainer
+var _grid: GridContainer
+var _scroll: ScrollContainer
 var _empty: Label
 var _icon: Texture2D
 var _assets: Array = []
@@ -54,13 +55,12 @@ func _ready() -> void:
 	_include.item_selected.connect(func(_i): _rebuild())
 	filter_row.add_child(_include)
 
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	vbox.add_child(scroll)
-	_grid = HFlowContainer.new()
-	_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.add_child(_grid)
+	_scroll = ScrollContainer.new()
+	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_scroll.resized.connect(_update_columns)
+	vbox.add_child(_scroll)
+	_grid = A2GUI.make_grid()
+	_scroll.add_child(_grid)
 	_empty = Label.new()
 	_empty.text = "No assets found."
 	_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -176,6 +176,13 @@ func _rebuild() -> void:
 		_request_preview(a, card)
 		shown += 1
 	_empty.visible = shown == 0
+	_update_columns()
+
+
+## Recomputes card width so each row fills the scroll view (gallery.gd math).
+func _update_columns() -> void:
+	if _scroll != null and _grid != null:
+		A2GUI.update_columns(_scroll, _grid)
 
 
 ## File assets get a real thumbnail via the editor previewer; in-memory

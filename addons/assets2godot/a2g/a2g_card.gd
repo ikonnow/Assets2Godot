@@ -12,7 +12,9 @@ signal activated(payload: Variant)
 const CORNER_RADIUS := 8
 const TITLE_PADDING := Vector2(10, 6)
 const FRAME_WIDTH := 2
-const CARD_WIDTH := 220
+## Narrowest card; the grid widens the cards to fill each row, matching
+## gallery_item.gd's constants so tiles size identically.
+const MIN_WIDTH := 200
 const STATES := ["normal", "hover", "pressed", "hover_pressed"]
 
 ## Kind -> the editor's own class icon, the same visual language the
@@ -85,7 +87,7 @@ func _init() -> void:
 
 func _ready() -> void:
 	if _width == 0.0:
-		_width = CARD_WIDTH * EditorInterface.get_editor_scale()
+		_width = MIN_WIDTH * EditorInterface.get_editor_scale()
 	pressed.connect(func(): activated.emit(payload))
 	mouse_entered.connect(_set_hovered.bind(true))
 	mouse_exited.connect(_set_hovered.bind(false))
@@ -122,6 +124,14 @@ func setup(title: String, kind: String, source: String, path: String, new_payloa
 func set_thumbnail(texture: Texture2D) -> void:
 	thumb.texture = texture
 	kind_icon.visible = texture == null
+
+
+## The grid's card width, the same for all cards of a row (gallery.gd's
+## update_columns computes it so each row fills exactly).
+func set_width(width: float) -> void:
+	_width = width
+	if is_node_ready():
+		_update_size()
 
 
 ## The theme's look, matching gallery_item.gd: PanelBackgroundButton bases
