@@ -17,7 +17,6 @@ var _refresh: Button
 var _scan: Button
 var _add: Button
 var _remove: Button
-var _search: LineEdit
 var _dir_dialog: EditorFileDialog
 
 
@@ -32,27 +31,27 @@ func _ready() -> void:
 	var head := HBoxContainer.new()
 	vbox.add_child(head)
 	var title := Label.new()
-	title.text = "Assets2Godot"
+	title.text = "Sources"
 	title.theme_type_variation = "HeaderSmall"
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(title)
-	_refresh = _head_button(head, "Refresh", "Reload providers and their roots.")
-	_refresh.pressed.connect(_on_refresh)
-	_scan = _head_button(head, "Scan", "Walk the configured roots and index their assets.")
-	_scan.pressed.connect(_on_scan)
-
-	var row := HBoxContainer.new()
-	vbox.add_child(row)
-	_add = _head_button(row, "Add folder…", "Add a directory to the local_dir provider's scan roots.")
+	_add = _head_button(head, "", "Add a directory to the local_dir provider's scan roots.")
+	_add.icon = _icon("Add")
+	_add.flat = true
 	_add.pressed.connect(_on_add)
-	_remove = _head_button(row, "Remove", "Remove the selected scan root from its provider.")
+	_remove = _head_button(head, "", "Remove the selected scan root, or adopt a detected one.")
+	_remove.icon = _icon("Remove")
+	_remove.flat = true
 	_remove.pressed.connect(_on_remove)
 	_remove.disabled = true
-	_search = LineEdit.new()
-	_search.placeholder_text = "Search index…"
-	_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_search.text_submitted.connect(_on_search)
-	row.add_child(_search)
+	_refresh = _head_button(head, "", "Reload providers and their roots.")
+	_refresh.icon = _icon("Reload")
+	_refresh.flat = true
+	_refresh.pressed.connect(_on_refresh)
+	_scan = _head_button(head, "", "Walk the configured roots and index their assets.")
+	_scan.icon = _icon("Play")
+	_scan.flat = true
+	_scan.pressed.connect(_on_scan)
 
 	_status = Label.new()
 	_status.text = "Client: …"
@@ -103,7 +102,10 @@ func _update_state() -> void:
 	_add.disabled = not connected
 	var sel = _selected_root()
 	_remove.disabled = not connected or sel == null
-	_remove.text = "Adopt" if sel != null and sel.get("candidate", false) else "Remove"
+	var adopt: bool = sel != null and sel.get("candidate", false)
+	_remove.icon = _icon("Add" if adopt else "Remove")
+	_remove.tooltip_text = ("Adopt the detected folder as a scan root."
+		if adopt else "Remove the selected scan root from its provider.")
 
 
 ## The selected tree row's {"provider","root"} metadata, or null when the
@@ -157,6 +159,8 @@ func _on_refresh() -> void:
 		for p in list:
 			var item := _tree.create_item(root)
 			item.set_text(0, "%s (%s)" % [p.get("name", "?"), p.get("kind", "?")])
+			item.set_icon(0, _icon("HTTPRequest" if str(p.get("kind", "")) == "remote" else "Folder"))
+			item.set_icon_max_width(0, _icon_size())
 			items[p.get("name", "")] = item
 		# blenderkit is remote; its endpoints are the client's own /assets/*.
 		for pname in ["fab_vault", "local_dir"]:
@@ -171,10 +175,13 @@ func _fill_status(item: TreeItem, pname: String, st) -> void:
 		return
 	var src := _tree.create_item(item)
 	src.set_text(0, "roots: " + str(st.get("roots_source", "?")))
+	src.set_icon(0, _icon("Tools"))
+	src.set_icon_max_width(0, _icon_size())
 	for r in st.get("roots", []):
 		var child := _tree.create_item(item)
-		var mark := "[+] " if r.get("exists", false) else "[-] "
-		child.set_text(0, mark + str(r.get("path", "")))
+		child.set_text(0, str(r.get("path", "")))
+		child.set_icon(0, _icon("StatusSuccess" if r.get("exists", false) else "StatusError"))
+		child.set_icon_max_width(0, _icon_size())
 		child.set_tooltip_text(0, "reachable" if r.get("exists", false) else "not found")
 		child.set_meta("provider", pname)
 		child.set_meta("root", str(r.get("path", "")))
@@ -186,7 +193,9 @@ func _fill_status(item: TreeItem, pname: String, st) -> void:
 				in_roots = true
 		if r.get("exists", false) and not in_roots:
 			var child := _tree.create_item(item)
-			child.set_text(0, "[?] " + str(r.get("path", "")))
+			child.set_text(0, str(r.get("path", "")))
+			child.set_icon(0, _icon("StatusWarning"))
+			child.set_icon_max_width(0, _icon_size())
 			child.set_tooltip_text(0, "detected, not configured — select and Adopt to scan it")
 			child.set_meta("provider", pname)
 			child.set_meta("root", str(r.get("path", "")))
@@ -194,6 +203,21 @@ func _fill_status(item: TreeItem, pname: String, st) -> void:
 	if st.get("index_available") == false:
 		var child := _tree.create_item(item)
 		child.set_text(0, "index unavailable")
+		child.set_icon(0, _icon("NodeWarning"))
+		child.set_icon_max_width(0, _icon_size())
+
+
+## Editor icon by name, null-safe — tree items just show text when a name
+## is missing in this Godot version.
+func _icon(icon_name: StringName) -> Texture2D:
+	var theme := EditorInterface.get_editor_theme()
+	if theme and theme.has_icon(icon_name, &"EditorIcons"):
+		return theme.get_icon(icon_name, &"EditorIcons")
+	return null
+
+
+func _icon_size() -> int:
+	return int(16 * EditorInterface.get_editor_scale())
 
 
 func _on_scan() -> void:
@@ -210,12 +234,17 @@ func _on_scan() -> void:
 				var item := _tree.create_item(root)
 				var sum: Dictionary = st.get("scanned", {})
 				item.set_text(0, "scan: %s — %d files indexed" % [pname, int(sum.get("files", 0))])
+				item.set_icon(0, _icon("Search"))
+				item.set_icon_max_width(0, _icon_size())
 				for r in sum.get("roots", []):
 					var c := _tree.create_item(item)
 					if r.get("skipped", false):
-						c.set_text(0, "[-] " + str(r.get("path", "")))
+						c.set_text(0, str(r.get("path", "")))
+						c.set_icon(0, _icon("StatusError"))
 					else:
 						c.set_text(0, "%s — %d indexed" % [r.get("path", ""), int(r.get("indexed", 0))])
+						c.set_icon(0, _icon("Folder"))
+					c.set_icon_max_width(0, _icon_size())
 			pending[0] -= 1
 			if pending[0] == 0:
 				_scan.disabled = not (plugin.connection and plugin.connection.is_client_connected())
@@ -263,19 +292,3 @@ func _on_remove() -> void:
 			_on_refresh()))
 
 
-func _on_search(query: String) -> void:
-	if query.strip_edges().is_empty():
-		return
-	_fetch("providers/search?q=%s" % query.uri_encode(), func(st):
-		if not (st is Dictionary):
-			return
-		var root := _tree.get_root()
-		if root == null:
-			root = _tree.create_item()
-		var item := _tree.create_item(root)
-		var results: Array = st.get("results", [])
-		item.set_text(0, "search '%s' — %d hits" % [query, results.size()])
-		for a in results:
-			var c := _tree.create_item(item)
-			c.set_text(0, "%s (%s, %s)" % [a.get("name", "?"), a.get("kind", "?"), a.get("provider", "?")])
-			c.set_tooltip_text(0, str(a.get("path", ""))))

@@ -8,7 +8,8 @@ extends PanelContainer
 const Icons = preload("res://addons/assets2godot/ui/icons.gd")
 const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
 
-const MAX_SCENE_RESOURCES := 300
+const DEFAULT_MAX_SCENE_RESOURCES := 300
+const SETTING_SCENE_CAP := "assets2godot/scene_resource_cap"
 const MAX_RES_DEPTH := 2
 
 var plugin: EditorPlugin
@@ -91,6 +92,7 @@ func _ready() -> void:
 	_show_files = CheckBox.new()
 	_show_files.text = "Show all files"
 	_show_files.tooltip_text = "Also list text files, configs and scripts — kinds that have no visual preview."
+	_show_files.button_pressed = _editor_setting("assets2godot/show_all_files", false)
 	_show_files.toggled.connect(func(_on): _rebuild())
 	filter_row.add_child(_show_files)
 
@@ -184,7 +186,7 @@ func _collect_scene() -> void:
 
 func _walk_node(node: Node) -> void:
 	for prop in node.get_property_list():
-		if _assets.size() >= MAX_SCENE_RESOURCES:
+		if _assets.size() >= _max_resources():
 			return
 		if prop.get("type") != TYPE_OBJECT or not (prop.get("usage", 0) & PROPERTY_USAGE_STORAGE):
 			continue
@@ -197,7 +199,7 @@ func _walk_node(node: Node) -> void:
 
 func _collect_resource(res: Resource, node: Node, prop: String, depth: int) -> void:
 	var id := res.get_instance_id()
-	if _seen.has(id) or depth > MAX_RES_DEPTH or _assets.size() >= MAX_SCENE_RESOURCES:
+	if _seen.has(id) or depth > MAX_RES_DEPTH or _assets.size() >= _max_resources():
 		return
 	_seen[id] = true
 	var title := res.resource_name
@@ -321,3 +323,15 @@ func _on_preview(_path: String, preview: Texture2D, thumbnail_preview: Texture2D
 	var tex: Texture2D = preview if preview else thumbnail_preview
 	if tex:
 		A2GUI.set_card_thumb(card, tex)
+
+
+## Settings → Assets2Godot → Scene resources cap bounds the scene walk.
+func _max_resources() -> int:
+	return int(_editor_setting(SETTING_SCENE_CAP, DEFAULT_MAX_SCENE_RESOURCES))
+
+
+func _editor_setting(key: String, fallback: Variant) -> Variant:
+	var es := EditorInterface.get_editor_settings()
+	if es and es.has_setting(key):
+		return es.get_setting(key)
+	return fallback
