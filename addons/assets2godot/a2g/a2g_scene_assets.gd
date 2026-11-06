@@ -103,9 +103,13 @@ func _ready() -> void:
 	margin.theme_type_variation = "NoBorderAssetLib"
 	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(margin)
+	# Bounded panel behind the scroll — the "right panel" look the
+	# FileSystem dock gives its file list.
+	var panel := PanelContainer.new()
+	margin.add_child(panel)
 	_scroll = ScrollContainer.new()
 	_scroll.resized.connect(_update_columns)
-	margin.add_child(_scroll)
+	panel.add_child(_scroll)
 	_grid = A2GUI.make_grid()
 	_scroll.add_child(_grid)
 	_empty = Label.new()
