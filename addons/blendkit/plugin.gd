@@ -33,6 +33,7 @@ const ISSUES_URL = "https://github.com/BlenderKit/bk_godot/issues"
 const gallery_scene = preload("res://addons/blendkit/ui/gallery/gallery.tscn")
 const A2GDock = preload("res://addons/blendkit/a2g/a2g_dock.gd")
 const A2GBrowser = preload("res://addons/blendkit/a2g/a2g_browser.gd")
+const A2GSceneAssets = preload("res://addons/blendkit/a2g/a2g_scene_assets.gd")
 const Auth = preload("res://addons/blendkit/auth.gd")
 const BlenderImport = preload("res://addons/blendkit/blender_import.gd")
 const ClientBinary = preload("res://addons/blendkit/client_binary.gd")
@@ -173,25 +174,32 @@ func _get_plugin_icon() -> Texture2D:
 const A2G_ICON_PATH := "res://addons/blendkit/a2g/icon.svg"
 
 
-# The A2G main-screen tab: the upstream gallery stays untouched as the
-# BlendKit provider surface; the unified index browser and the local
-# assets management live as sibling tabs on the same screen.
+# The A2G main-screen tab: Scene Assets (the project's own files) first,
+# Assets2Godot (unified browser + local roots management side by side)
+# second, the untouched upstream gallery as BlendKit third.
 func init_gallery() -> void:
 	main_tabs = TabContainer.new()
 	main_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var scene_assets := A2GSceneAssets.new()
+	scene_assets.plugin = self
+	scene_assets.name = "Scene Assets"
+	main_tabs.add_child(scene_assets)
+	var a2g := HSplitContainer.new()
+	a2g.name = "Assets2Godot"
+	var local := A2GDock.new()
+	local.plugin = self
+	local.custom_minimum_size = Vector2(300, 0)
+	a2g.add_child(local)
+	var browser := A2GBrowser.new()
+	browser.plugin = self
+	browser.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	a2g.add_child(browser)
+	main_tabs.add_child(a2g)
 	gallery = gallery_scene.instantiate()
 	gallery.plugin = self
 	gallery.name = "BlendKit"
 	gallery.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	main_tabs.add_child(gallery)
-	var browser := A2GBrowser.new()
-	browser.plugin = self
-	browser.name = "A2G"
-	main_tabs.add_child(browser)
-	var local := A2GDock.new()
-	local.plugin = self
-	local.name = "Local Assets"
-	main_tabs.add_child(local)
 	main_tabs.hide()
 	EditorInterface.get_editor_main_screen().add_child(main_tabs)
 
