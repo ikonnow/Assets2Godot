@@ -207,14 +207,17 @@ func init_gallery() -> void:
 	a2g.add_theme_constant_override("separation", int(8 * EditorInterface.get_editor_scale()))
 	var local := A2GDock.new()
 	local.plugin = self
-	local.custom_minimum_size = Vector2(280, 0)
+	# Small minimums keep the dragger's travel nearly edge-to-edge, like
+	# the FileSystem dock's own split — the panel never gets "stuck".
+	local.custom_minimum_size = Vector2(150, 0)
 	a2g.add_child(local)
 	var browser := A2GBrowser.new()
 	browser.plugin = self
-	browser.custom_minimum_size = Vector2(400, 0)
+	browser.custom_minimum_size = Vector2(180, 0)
 	browser.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	a2g.add_child(browser)
 	a2g.split_offset = int(340 * EditorInterface.get_editor_scale())
+	local.split = a2g
 	# A finished scan reindexes — refresh the browser so results appear
 	# without a manual search.
 	local.scanned.connect(browser.refresh)
