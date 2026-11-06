@@ -57,6 +57,8 @@ var _downloaded := false
 var _tooltip := ""
 ## The gallery's download state of this asset, see gallery.downloads.
 var _download: Dictionary = {}
+## Assets2Godot local-asset chrome, see setup_a2g().
+var _a2g: Dictionary = {}
 var _width := 0.0
 var _hovered := false
 ## Adding the theme overrides notifies a theme change; ignore those.
@@ -95,6 +97,26 @@ func _notification(what: int) -> void:
 			_layout()
 
 
+## Assets2Godot: configures this card for a local/indexed asset so every
+## surface uses the identical tile. [param badge] shows on the plan
+## badge's spot, [param type_icon] is an EditorIcons name displayed until
+## a thumbnail arrives via set_thumb_texture(), [param payload] rides
+## along in asset["a2g_payload"] for the `selected` signal.
+func setup_a2g(title: String, badge: String, type_icon: String, tip: String, payload: Variant = null) -> void:
+	asset = {"name": title, "displayName": title, "a2g": true, "a2g_payload": payload}
+	_a2g = {"badge": badge, "icon": type_icon, "tip": tip}
+	if is_node_ready():
+		_update()
+
+
+## Assets2Godot: a thumbnail texture set directly instead of the decoded
+## BlendKit image paths.
+func set_thumb_texture(texture: Texture2D) -> void:
+	_shown = "a2g"
+	thumb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	thumb.texture = texture
+
+
 func setup(new_asset: Dictionary) -> void:
 	asset = new_asset
 	if is_node_ready():
@@ -119,6 +141,42 @@ func _update() -> void:
 	_update_size()
 	_update_download()
 	_update_thumbnail()
+	if asset.get("a2g", false):
+		_tooltip = _a2g.get("tip", title)
+		tooltip_text = _tooltip
+		_update_a2g_badge()
+		_update_a2g_icon()
+
+
+## A2G cards restyle the plan badge as a kind chip, same pill shape.
+func _update_a2g_badge() -> void:
+	var text: String = _a2g.get("badge", "")
+	plan_label.visible = text != ""
+	if not plan_label.visible:
+		return
+	var edscale := EditorInterface.get_editor_scale()
+	plan_label.text = text
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color(0, 0, 0, 0.55)
+	box.set_corner_radius_all(int(100 * edscale))
+	box.content_margin_left = Plans.BADGE_PADDING.x * edscale
+	box.content_margin_right = Plans.BADGE_PADDING.x * edscale
+	box.content_margin_top = Plans.BADGE_PADDING.y * edscale
+	box.content_margin_bottom = Plans.BADGE_PADDING.y * edscale
+	plan_label.add_theme_stylebox_override("normal", box)
+	plan_label.add_theme_color_override("font_color", Color.WHITE)
+	Plans.place_badge(plan_label)
+
+
+## A2G cards show the resource's own EditorIcons type icon until a
+## thumbnail arrives — same KEEP_CENTERED fallback as _update_thumbnail().
+func _update_a2g_icon() -> void:
+	if thumb.texture != null:
+		return
+	thumb.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
+	var icon_name: String = _a2g.get("icon", "File")
+	thumb.texture = get_theme_icon(icon_name, "EditorIcons") \
+		if has_theme_icon(icon_name, "EditorIcons") else get_theme_icon("File", "EditorIcons")
 
 
 ## The theme's look, then the asset's.
@@ -237,6 +295,8 @@ func _wanted_thumbnail() -> String:
 ## The shown thumbnail stays until the wanted one is decoded, see
 ## _decode_queued().
 func _update_thumbnail() -> void:
+	if asset.get("a2g", false):
+		return
 	if not _near_view:
 		return
 	var path := _wanted_thumbnail()
