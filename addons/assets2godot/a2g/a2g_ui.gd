@@ -49,47 +49,31 @@ static func kind_for_resource(res: Resource) -> String:
 		return "scene_data"
 	return "resource"
 
-
-static func kind_color(kind: String) -> Color:
-	match kind:
-		"model": return Color(0.22, 0.35, 0.55, 0.85)
-		"texture": return Color(0.25, 0.5, 0.3, 0.85)
-		"hdr": return Color(0.55, 0.4, 0.2, 0.85)
-		"material": return Color(0.45, 0.3, 0.55, 0.85)
-		"ue_asset": return Color(0.3, 0.3, 0.32, 0.9)
-		"scene_data": return Color(0.35, 0.45, 0.55, 0.85)
-		"resource": return Color(0.4, 0.4, 0.45, 0.85)
-		"animation": return Color(0.55, 0.35, 0.35, 0.85)
-		"file": return Color(0.32, 0.32, 0.34, 0.8)
-		"metadata": return Color(0.35, 0.35, 0.4, 0.7)
-		_: return Color(0.3, 0.3, 0.34, 0.8)
+const GALLERY_ITEM := preload("res://addons/assets2godot/ui/gallery/gallery_item.tscn")
+const GalleryItemScript = preload("res://addons/assets2godot/ui/gallery/gallery_item.gd")
 
 
-const A2GCard = preload("res://addons/assets2godot/a2g/a2g_card.gd")
-
-
-## A gallery-style card identical in look to ui/gallery/gallery_item.tscn:
-## square clipped thumbnail, kind badge, name below, hover/focus frame.
-static func asset_card(title: String, kind: String, source: String, path: String, icon: Texture2D, type_name: String = "") -> Control:
-	var card: Control = A2GCard.new()
-	card.setup(title, kind, source, path, {"path": path, "kind": kind, "source": source}, icon, type_name)
-	return card
+## The identical tile the BlendKit gallery uses — a real GalleryItem scene
+## instance configured for a local/indexed asset via setup_a2g(), so every
+## A2G surface is pixel-identical by construction.
+static func asset_card(title: String, kind: String, source: String, path: String, _icon: Texture2D, type_name: String = "") -> Control:
+	var item: Control = GALLERY_ITEM.instantiate()
+	item.setup_a2g(title, kind, type_name, "%s\n%s · %s\n%s" % [title, kind, source, path],
+		{"path": path, "kind": kind, "source": source})
+	return item
 
 
 ## Sets the real preview texture on a card built by asset_card().
 static func set_card_thumb(card: Control, texture: Texture2D) -> void:
-	if is_instance_valid(card) and card.has_method("set_thumbnail"):
-		card.set_thumbnail(texture)
-
-
-const GRID_GAP := 16
+	if is_instance_valid(card) and card.has_method("set_thumb_texture"):
+		card.set_thumb_texture(texture)
 
 
 ## The same column math as ui/gallery/gallery.gd's update_columns(): cards
 ## are widened so every row fills the scroll view exactly, minimum
-## A2GCard.MIN_WIDTH * editor scale.
+## GalleryItem.MIN_WIDTH * editor scale.
 static func update_columns(scroll: ScrollContainer, grid: GridContainer) -> void:
-	var min_width := A2GCard.MIN_WIDTH * EditorInterface.get_editor_scale()
+	var min_width := GalleryItemScript.MIN_WIDTH * EditorInterface.get_editor_scale()
 	var separation := grid.get_theme_constant("h_separation")
 	var available := scroll.size.x
 	var columns := maxi(1, int((available + separation) / (min_width + separation)))
@@ -104,7 +88,7 @@ static func update_columns(scroll: ScrollContainer, grid: GridContainer) -> void
 static func make_grid() -> GridContainer:
 	var grid := GridContainer.new()
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var gap := int(GRID_GAP * EditorInterface.get_editor_scale())
+	var gap := int(GalleryItemScript.GAP * EditorInterface.get_editor_scale())
 	grid.add_theme_constant_override("h_separation", gap)
 	grid.add_theme_constant_override("v_separation", gap)
 	return grid
