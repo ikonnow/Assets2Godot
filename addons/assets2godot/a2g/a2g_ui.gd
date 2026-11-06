@@ -68,6 +68,13 @@ static func short_path(path: String, max_len := 56) -> String:
 
 const GALLERY_ITEM := preload("res://addons/assets2godot/ui/gallery/gallery_item.tscn")
 const GalleryItemScript = preload("res://addons/assets2godot/ui/gallery/gallery_item.gd")
+const BlenderImport = preload("res://addons/assets2godot/blender_import.gd")
+
+## Staged external assets land here — one folder per asset, like the
+## architecture spec's res://imported_assets/<asset_name>/.
+const STAGING_DIR := "res://imported_assets"
+const PREVIEW_IMAGE_EXTS := ["png", "jpg", "jpeg", "tga", "webp", "bmp",
+	"exr", "hdr", "tif", "tiff"]
 
 
 ## The identical tile the BlendKit gallery uses — a real GalleryItem scene
@@ -88,7 +95,7 @@ static func asset_card(title: String, kind: String, source: String, path: String
 ## upstream uses internally (navigate_to_path, edit_resource,
 ## open_scene_from_path, edit_node, reimport_files, clipboard_set,
 ## shell_show_in_file_manager).
-enum AssetMenu { SHOW_FS, OPEN, EDIT_RES, SELECT_NODE, COPY_NODE_PATH, REIMPORT, SHOW_FM, COPY_PATH }
+enum AssetMenu { SHOW_FS, OPEN, EDIT_RES, SELECT_NODE, COPY_NODE_PATH, REIMPORT, SHOW_FM, COPY_PATH, STAGE }
 
 
 static func _on_card_gui_input(item: Control, ev: InputEvent) -> void:
@@ -116,6 +123,13 @@ static func asset_context_menu(entry: Dictionary, card: Control) -> void:
 		menu.add_icon_item(_menu_icon("ShowInFileSystem"), "Show in FileSystem", AssetMenu.SHOW_FS)
 		menu.add_icon_item(_menu_icon("Load"), "Open", AssetMenu.OPEN)
 		menu.add_icon_item(_menu_icon("Reload"), "Reimport", AssetMenu.REIMPORT)
+	elif is_os_file:
+		# External files can be staged into the project — same intent as
+		# dragging a file from the OS into the FileSystem dock.
+		menu.add_icon_item(_menu_icon("Import"), "Import into project", AssetMenu.STAGE)
+		if path.get_extension().to_lower() == "blend" and not _blend_ready():
+			menu.set_item_tooltip(menu.item_count - 1,
+				".blend import is off or Blender isn't configured — the staged file stays hidden until Settings → Blender Import is set up.")
 	if has_res:
 		if menu.item_count:
 			menu.add_separator()
@@ -175,6 +189,58 @@ static func _on_asset_menu(id: int, entry: Dictionary) -> void:
 			OS.shell_show_in_file_manager(ProjectSettings.globalize_path(path) if path.begins_with("res://") else path)
 		AssetMenu.COPY_PATH:
 			DisplayServer.clipboard_set(path)
+		AssetMenu.STAGE:
+			stage_into_project(entry)
+
+
+## Copies an external file into res://imported_assets/<name>/ and lets
+## Godot's own importer take over — FBX/glTF import natively, .blend goes
+## through the Blender configured in Settings → Blender Import (the same
+## settings the BlendKit downloads use, not a parallel setup). Returns the
+## staged res:// path, "" when nothing was copied.
+static func stage_into_project(entry: Dictionary) -> String:
+	var src := str(entry.get("path", ""))
+	# Indexed paths may carry OS separators; get_file() only splits "/".
+	src = src.replace("\\", "/")
+	if src == "" or src.begins_with("res://") or not FileAccess.file_exists(src):
+		return ""
+	var dir_res := STAGING_DIR.path_join(src.get_file().get_basename().validate_filename())
+	var mk := DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir_res))
+	if mk != OK:
+		push_warning("A2G: couldn't create %s (%s)" % [dir_res, error_string(mk)])
+		return ""
+	var dst := dir_res.path_join(src.get_file())
+	var err := DirAccess.copy_absolute(src, ProjectSettings.globalize_path(dst))
+	if err != OK:
+		push_warning("A2G: couldn't stage %s (%s)" % [src, error_string(err)])
+		return ""
+	# A same-basename preview image travels with the asset — the sibling
+	# match that powers browser thumbnails also keeps the staged copy's
+	# preview instead of becoming an orphan in the project.
+	for ext in PREVIEW_IMAGE_EXTS:
+		var sib: String = src.get_basename() + "." + ext
+		if FileAccess.file_exists(sib):
+			DirAccess.copy_absolute(sib, ProjectSettings.globalize_path(
+				dir_res.path_join(sib.get_file())))
+			break
+	if src.get_extension().to_lower() == "blend" and not _blend_ready():
+		# The Blender Import setting governs whether Godot imports .blend
+		# at all; with it off the staged file stays hidden — exactly like
+		# upstream describes for BlendKit .blend downloads.
+		push_warning("A2G: staged %s, but .blend import isn't set up — it stays hidden until Settings → Blender Import enables native import with a Blender 3.0+ path." % src.get_file())
+	EditorInterface.get_resource_filesystem().scan()
+	EditorInterface.get_file_system_dock().navigate_to_path(dst)
+	return dst
+
+
+## Godot can import .blend when the Blender Import settings say so:
+## native import on plus a configured, existing Blender path. Reuses the
+## upstream plugin's own settings — no parallel configuration.
+static func _blend_ready() -> bool:
+	if not BlenderImport.blend_import_enabled():
+		return false
+	var bpath := BlenderImport.blender_path()
+	return not bpath.is_empty() and FileAccess.file_exists(bpath)
 
 
 ## "Open" dispatches like the FileSystem dock's default action: scenes open
@@ -187,7 +253,10 @@ static func _open_entry(entry: Dictionary) -> void:
 		return
 	var res := load(path)
 	if res == null:
-		EditorInterface.get_file_system_dock().navigate_to_path(path)
+		if path.begins_with("res://"):
+			EditorInterface.get_file_system_dock().navigate_to_path(path)
+		elif FileAccess.file_exists(path):
+			OS.shell_show_in_file_manager(path)
 	elif res is Script:
 		EditorInterface.edit_script(res)
 	else:
