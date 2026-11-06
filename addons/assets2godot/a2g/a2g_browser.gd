@@ -95,13 +95,19 @@ func _ready() -> void:
 	margin.theme_type_variation = "NoBorderAssetLib"
 	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(margin)
+	# The grid scroll sits in a PanelContainer — same bounded "right panel"
+	# look the FS dock's file list gets from ItemListSecondary.
+	var panel := PanelContainer.new()
+	margin.add_child(panel)
 	_scroll = ScrollContainer.new()
 	_scroll.resized.connect(_update_columns)
-	margin.add_child(_scroll)
+	panel.add_child(_scroll)
 	_grid = A2GUI.make_grid()
 	_scroll.add_child(_grid)
-	# List view — FileSystem-dock-style rows (icon + name), same margin chrome.
+	# List view — FileSystem-dock-style rows (icon + name); the
+	# ItemListSecondary variation is the secondary bg the FS list uses.
 	_list = ItemList.new()
+	_list.theme_type_variation = "ItemListSecondary"
 	_list.fixed_icon_size = Vector2i(int(20 * EditorInterface.get_editor_scale()),
 		int(20 * EditorInterface.get_editor_scale()))
 	_list.item_clicked.connect(_on_list_item_clicked)

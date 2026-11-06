@@ -74,6 +74,9 @@ func _ready() -> void:
 	_tree.hide_root = true
 	_tree.scroll_horizontal_enabled = true
 	_tree.allow_rmb_select = true
+	# Same variation the FileSystem dock's tree gets in split mode — gives
+	# the secondary panel background that separates it from the base.
+	_tree.theme_type_variation = "TreeSecondary"
 	_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_tree.item_selected.connect(_update_state)
 	_tree.item_mouse_selected.connect(_on_tree_rmb)
@@ -249,21 +252,14 @@ func _toggle_split() -> void:
 
 
 func _update_split_icon() -> void:
+	# The FS dock's split button cycles Panels1/Panels2/Panels2Alt —
+	# Panels2 = side by side, Panels2Alt = stacked (editor source,
+	# docs/research/editor_ui_parity.md §2).
 	var vertical := split != null and split.vertical
-	_split_btn.icon = _first_icon(
-		["GuiHsplit", "GuiVsplit"] if vertical else ["GuiVsplit", "GuiHsplit"])
-	# No split glyph in this theme — a compact text mark still reads.
+	_split_btn.icon = _icon("Panels2Alt" if vertical else "Panels2")
 	_split_btn.text = "" if _split_btn.icon else "⇄"
 
 
-## First resolvable EditorIcons name — icon names differ between Godot
-## versions, null is fine (button just shows none).
-func _first_icon(names: Array) -> Texture2D:
-	for icon_name in names:
-		var tex := _icon(icon_name)
-		if tex != null:
-			return tex
-	return null
 
 
 func _on_scan() -> void:
