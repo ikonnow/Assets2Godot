@@ -314,10 +314,17 @@ static func make_scroll_border() -> PanelContainer:
 	return border
 
 
-## A ScrollContainer configured like the gallery's Scroll node.
+## A ScrollContainer configured like the gallery's Scroll node: the editor
+## theme's "Tree" panel stylebox as panel override (its content margin
+## insets the scroll content ~6px left, and it paints the bounded-panel
+## background upstream has) + horizontal scrollbar never shown.
 static func make_scroll() -> ScrollContainer:
 	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	# Resolved against the editor base control — an out-of-tree control has
+	# no editor theme context yet.
+	scroll.add_theme_stylebox_override("panel",
+			EditorInterface.get_base_control().get_theme_stylebox("panel", "Tree"))
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
 	return scroll
 
 
