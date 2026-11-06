@@ -107,7 +107,6 @@ func _ready() -> void:
 	# Right-click selects the row under the cursor before the context menu
 	# opens — same as FileSystemTree's allow_rmb_select.
 	_list.allow_rmb_select = true
-	_list.same_column_width = true
 	_list.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_list.item_clicked.connect(_on_list_item_clicked)
 	_list.item_activated.connect(_on_list_item_activated)
@@ -252,11 +251,15 @@ func _update_view_flags() -> void:
 	if _list == null:
 		return
 	var edscale := EditorInterface.get_editor_scale()
+	# Values measured against the live native FileSystemList — see
+	# docs/research/editor_ui_parity.md §2 (FileSystemList display modes).
 	if list:
 		_list.icon_mode = ItemList.ICON_MODE_LEFT
 		_list.fixed_column_width = 0
-		_list.fixed_icon_size = Vector2i(int(20 * edscale), int(20 * edscale))
+		_list.fixed_icon_size = Vector2i(int(16 * edscale), int(16 * edscale))
 		_list.max_text_lines = 1
+		_list.max_columns = 1
+		_list.same_column_width = false
 	else:
 		# EditorFileDialog's thumbnail_size (editor setting, default 64) is
 		# the tile size the FS dock uses; columns are 1.5x that.
@@ -265,6 +268,8 @@ func _update_view_flags() -> void:
 		_list.fixed_column_width = int(thumb * 1.5 * edscale)
 		_list.fixed_icon_size = Vector2i(int(thumb * edscale), int(thumb * edscale))
 		_list.max_text_lines = 2
+		_list.max_columns = 0
+		_list.same_column_width = false
 
 
 ## Editor settings helpers — assets2godot/* values registered by the
