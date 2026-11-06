@@ -31,6 +31,7 @@ const SOURCES_URL = "https://github.com/BlenderKit/bk_godot"
 const ISSUES_URL = "https://github.com/BlenderKit/bk_godot/issues"
 
 const gallery_scene = preload("res://addons/blendkit/ui/gallery/gallery.tscn")
+const A2GDock = preload("res://addons/blendkit/a2g/a2g_dock.gd")
 const Auth = preload("res://addons/blendkit/auth.gd")
 const BlenderImport = preload("res://addons/blendkit/blender_import.gd")
 const ClientBinary = preload("res://addons/blendkit/client_binary.gd")
@@ -105,6 +106,7 @@ var addon_version: String
 var connection: ClientConnection
 var auth: Auth
 var gallery: Control
+var a2g_dock: Control
 
 
 func _enter_tree() -> void:
@@ -124,6 +126,9 @@ func _enter_tree() -> void:
 	add_child(auth)
 
 	init_gallery()
+	a2g_dock = A2GDock.new()
+	a2g_dock.plugin = self
+	add_control_to_dock(DOCK_SLOT_RIGHT_UL, a2g_dock)
 	ProjectSettings.settings_changed.connect(load_settings)
 	EditorInterface.get_editor_settings().settings_changed.connect(load_settings)
 	if client_enabled:
@@ -139,6 +144,10 @@ func _exit_tree() -> void:
 	if gallery:
 		gallery.queue_free()
 		gallery = null
+	if a2g_dock:
+		remove_control_from_docks(a2g_dock)
+		a2g_dock.queue_free()
+		a2g_dock = null
 	log_info("Plugin exited")
 
 
