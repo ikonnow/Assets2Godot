@@ -4,7 +4,7 @@
 # client releases (downloaded + extracted on-demand)
 /client-dist
 # client binaries (built on-demand)
-/addons/blendkit/client
+/addons/assets2godot/client
 # downloaded assets
 /bk_assets
 /out

@@ -25,7 +25,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 
 PLUGIN_SRC_DIR = "addons"
-PLUGIN_DIR = "blendkit"
+PLUGIN_DIR = "assets2godot"
 CLIENT_DIR = "bk_client"
 CLIENT_REPO_URL = "https://github.com/BlenderKit/bk_client.git"
 CLIENT_REPO_REF = "main"
@@ -343,7 +343,7 @@ def get_archive_base_name(version: str) -> str:
 
 def get_plugin_version() -> str:
     """Read plugin version from plugin.cfg."""
-    config_path = os.path.join(PLUGIN_SRC_DIR, "blendkit", "plugin.cfg")
+    config_path = os.path.join(PLUGIN_SRC_DIR, "assets2godot", "plugin.cfg")
     config = configparser.ConfigParser()
     config.read(config_path)
     return config.get("plugin", "version").strip('"')
@@ -351,7 +351,7 @@ def get_plugin_version() -> str:
 
 def set_plugin_version(version: str):
     """Update plugin version in plugin.cfg."""
-    config_path = os.path.join(PLUGIN_SRC_DIR, "blendkit", "plugin.cfg")
+    config_path = os.path.join(PLUGIN_SRC_DIR, "assets2godot", "plugin.cfg")
     version = version.lstrip("v")
     print(f"# Setting version to {version} in {config_path}")
 
@@ -635,7 +635,7 @@ parser_build_client.add_argument(
 parser_build_plugin = subparsers.add_parser(
     "build-plugin",
     help="Copy client binaries into plugin directory.",
-    description="Copy client binaries into addons/blendkit/client/ (in-place).",
+    description="Copy client binaries into addons/assets2godot/client/ (in-place).",
     formatter_class=NiceHelpFormatter,
 )
 parser_build_plugin.set_defaults(func=build_plugin)

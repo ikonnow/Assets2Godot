@@ -23,10 +23,11 @@ config/icon="uid://5n2k0xbtnud2"
 [blendkit]
 
 downloads/directory="res://bk_assets"
+downloads/model_format="gltf_godot"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/blendkit/plugin.cfg")
+enabled=PackedStringArray("res://addons/assets2godot/plugin.cfg")
 
 [rendering]
 
