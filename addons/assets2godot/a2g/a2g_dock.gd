@@ -18,6 +18,9 @@ var _scan: Button
 var _add: Button
 var _remove: Button
 var _dir_dialog: EditorFileDialog
+## provider name → its root-level TreeItem, so scan results nest under
+## their provider like an outliner instead of flooding the tree root.
+var _provider_items := {}
 
 
 func _ready() -> void:
@@ -59,6 +62,7 @@ func _ready() -> void:
 
 	_tree = Tree.new()
 	_tree.hide_root = true
+	_tree.scroll_horizontal_enabled = true
 	_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_tree.item_selected.connect(_update_state)
 	vbox.add_child(_tree)
@@ -154,18 +158,18 @@ func _on_refresh() -> void:
 			_status.text = "Client: providers/list failed"
 			_update_state()
 			return
-		var items := {}
+		_provider_items.clear()
 		for p in list:
 			var item := _tree.create_item(root)
 			item.set_text(0, "%s (%s)" % [p.get("name", "?"), p.get("kind", "?")])
 			item.set_icon(0, _icon("HTTPRequest" if str(p.get("kind", "")) == "remote" else "Folder"))
 			item.set_icon_max_width(0, _icon_size())
-			items[p.get("name", "")] = item
+			_provider_items[p.get("name", "")] = item
 		# blenderkit is remote; its endpoints are the client's own /assets/*.
 		for pname in ["fab_vault", "local_dir"]:
-			if items.has(pname):
+			if _provider_items.has(pname):
 				_fetch("providers/%s/status" % pname, func(st):
-					_fill_status(items.get(pname), pname, st))
+					_fill_status(_provider_items.get(pname), pname, st))
 		_update_state())
 
 
@@ -221,29 +225,32 @@ func _icon_size() -> int:
 
 func _on_scan() -> void:
 	_scan.disabled = true
-	var root := _tree.get_root()
-	if root == null:
-		root = _tree.create_item()
 	# Lambdas capture locals by value; an Array keeps the counter shared.
 	var pending := [0]
 	for pname in ["fab_vault", "local_dir"]:
 		pending[0] += 1
 		_fetch("providers/%s/scan" % pname, func(st):
 			if st is Dictionary:
-				var item := _tree.create_item(root)
-				var sum: Dictionary = st.get("scanned", {})
-				item.set_text(0, "scan: %s — %d files indexed" % [pname, int(sum.get("files", 0))])
-				item.set_icon(0, _icon("Search"))
-				item.set_icon_max_width(0, _icon_size())
-				for r in sum.get("roots", []):
-					var c := _tree.create_item(item)
-					if r.get("skipped", false):
-						c.set_text(0, str(r.get("path", "")))
-						c.set_icon(0, _icon("StatusError"))
-					else:
-						c.set_text(0, "%s — %d indexed" % [r.get("path", ""), int(r.get("indexed", 0))])
-						c.set_icon(0, _icon("Folder"))
-					c.set_icon_max_width(0, _icon_size())
+				# Scan results nest under their provider row — the tree
+				# stays an outliner of sources, not a flat log.
+				var parent: TreeItem = _provider_items.get(pname)
+				if parent == null:
+					parent = _tree.get_root()
+				if parent != null:
+					var item := _tree.create_item(parent)
+					var sum: Dictionary = st.get("scanned", {})
+					item.set_text(0, "scan — %d files indexed" % int(sum.get("files", 0)))
+					item.set_icon(0, _icon("Search"))
+					item.set_icon_max_width(0, _icon_size())
+					for r in sum.get("roots", []):
+						var c := _tree.create_item(item)
+						if r.get("skipped", false):
+							c.set_text(0, str(r.get("path", "")))
+							c.set_icon(0, _icon("StatusError"))
+						else:
+							c.set_text(0, "%s — %d indexed" % [r.get("path", ""), int(r.get("indexed", 0))])
+							c.set_icon(0, _icon("Folder"))
+						c.set_icon_max_width(0, _icon_size())
 			pending[0] -= 1
 			if pending[0] == 0:
 				_scan.disabled = not (plugin.connection and plugin.connection.is_client_connected())
