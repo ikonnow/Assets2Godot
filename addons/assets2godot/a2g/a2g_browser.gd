@@ -31,9 +31,6 @@ var _provider_filter: OptionButton
 var _kind_filter: OptionButton
 var _refresh: Button
 var _view_toggle: Button
-var _grid: GridContainer
-var _scroll: ScrollContainer
-var _border: PanelContainer
 var _list: ItemList
 var _empty: Label
 var _icon: Texture2D
@@ -75,7 +72,7 @@ func _ready() -> void:
 	_view_toggle.pressed.connect(_toggle_view)
 	search_row.add_child(_view_toggle)
 	_view_mode = _setting(SETTING_VIEW, View.GRID)
-	_update_view_toggle()
+	_update_view_flags()
 	# Split-mode toggle — the FS dock puts display_mode at the right end of
 	# the file panel's toolbar, not on the tree side.
 	_split_btn = Button.new()
@@ -101,31 +98,23 @@ func _ready() -> void:
 	_kind_filter.item_selected.connect(func(_i): _rebuild())
 	filter_row.add_child(_kind_filter)
 
-	# Scrollable card grid + empty state — identical chrome to
-	# gallery.tscn: Margin(NoBorderAssetLib) → Scroll → Border panel
-	# (empty stylebox, L15/T0/R35/B15) → Grid.
+	# The FileSystem dock's file panel: one ItemListSecondary whose
+	# icon_mode switches between the dock's two display modes —
+	# FILE_DISPLAY_THUMBNAILS (ICON_MODE_TOP, fixed tiles, previews as
+	# icons) and FILE_DISPLAY_LIST (ICON_MODE_LEFT, compact rows).
 	var margin := MarginContainer.new()
 	margin.theme_type_variation = "NoBorderAssetLib"
 	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(margin)
-	_scroll = A2GUI.make_scroll()
-	_scroll.resized.connect(_update_columns)
-	margin.add_child(_scroll)
-	_border = A2GUI.make_scroll_border()
-	_scroll.add_child(_border)
-	_grid = A2GUI.make_grid()
-	_border.add_child(_grid)
-	# List view — FileSystem-dock-style rows (icon + name); the
-	# ItemListSecondary variation is the secondary bg the FS list uses.
 	_list = ItemList.new()
 	_list.theme_type_variation = "ItemListSecondary"
-	_list.fixed_icon_size = Vector2i(int(20 * EditorInterface.get_editor_scale()),
-		int(20 * EditorInterface.get_editor_scale()))
+	_list.same_column_width = true
+	_list.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_list.item_clicked.connect(_on_list_item_clicked)
 	_list.item_activated.connect(_on_list_item_activated)
-	_list.visible = _view_mode == View.LIST
+	_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	margin.add_child(_list)
-	_scroll.visible = _view_mode == View.GRID
+	_update_view_flags()
 	_empty = Label.new()
 	_empty.text = "No indexed assets yet.\nAdd folders and press Scan in the Local Assets tab."
 	_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -173,8 +162,6 @@ func _reload() -> void:
 
 
 func _rebuild() -> void:
-	for c in _grid.get_children():
-		c.queue_free()
 	_list.clear()
 	_list_entries.clear()
 	_refill_filters()
@@ -191,23 +178,19 @@ func _rebuild() -> void:
 			continue
 		if kind_sel != "All" and a.get("kind", "") != kind_sel:
 			continue
-		if _view_mode == View.GRID:
-			var card := A2GUI.asset_card(a.get("name", "?"), a.get("kind", "?"),
-				a.get("provider", "?"), a.get("path", ""), _icon, "",
-				{"ext": str(a.get("path", "")).get_extension().to_lower()})
-			_grid.add_child(card)
-			_queue_preview(a.get("path", ""), card)
-		else:
-			var path := str(a.get("path", ""))
-			var idx := _list.add_item("%s  ·  %s  ·  %s" % [a.get("name", "?"),
-				a.get("kind", "?"), a.get("provider", "?")], _list_icon(str(a.get("kind", ""))))
-			_list.set_item_tooltip(idx, "%s\n%s" % [path.get_file(), A2GUI.short_path(path)])
-			_list_entries.append({"path": path, "kind": a.get("kind", ""),
-				"provider": a.get("provider", ""),
-				"ext": path.get_extension().to_lower()})
+		var path := str(a.get("path", ""))
+		# Tile mode shows the plain name like the FS dock; list rows carry
+		# kind + provider where the extra width is useful.
+		var label := str(a.get("name", "?")) if _view_mode == View.GRID \
+			else "%s  ·  %s  ·  %s" % [a.get("name", "?"), a.get("kind", "?"), a.get("provider", "?")]
+		var idx := _list.add_item(label, _list_icon(str(a.get("kind", ""))))
+		_list.set_item_tooltip(idx, "%s\n%s" % [path.get_file(), A2GUI.short_path(path)])
+		_list_entries.append({"path": path, "kind": a.get("kind", ""),
+			"provider": a.get("provider", ""),
+			"ext": path.get_extension().to_lower()})
+		_queue_preview(path, {"idx": idx, "path": path})
 		shown += 1
 	_empty.visible = shown == 0
-	_update_columns()
 
 
 ## Right-click on a list row opens the same asset context menu the cards
@@ -234,7 +217,7 @@ func _list_icon(kind: String) -> Texture2D:
 func _toggle_view() -> void:
 	_view_mode = View.LIST if _view_mode == View.GRID else View.GRID
 	_set_setting(SETTING_VIEW, _view_mode)
-	_update_view_toggle()
+	_update_view_flags()
 	_rebuild()
 
 
@@ -257,17 +240,32 @@ func _update_split_icon() -> void:
 	_split_btn.icon = _editor_icon("Panels2Alt" if vertical else "Panels2")
 
 
-func _update_view_toggle() -> void:
+## Applies the FileSystem dock's FILE_DISPLAY_* flags to the list for the
+## current view mode: THUMBNAILS = top-icon tiles with real previews at
+## fixed_icon_size, LIST = left-icon rows. Mirrors update_file_list_display_mode.
+func _update_view_flags() -> void:
 	var list := _view_mode == View.LIST
-	_view_toggle.button_pressed = list
-	_view_toggle.icon = _editor_icon("FileThumbnail" if list else "FileList")
-	_view_toggle.tooltip_text = ("Switch to tile view." if list
-		else "Switch to list view.")
-	# Null while _ready() runs: the controls are created after this call.
-	if _list != null:
-		_list.visible = list
-	if _scroll != null:
-		_scroll.visible = not list
+	if _view_toggle != null:
+		_view_toggle.button_pressed = list
+		_view_toggle.icon = _editor_icon("FileThumbnail" if list else "FileList")
+		_view_toggle.tooltip_text = ("Switch to tile view." if list
+			else "Switch to list view.")
+	if _list == null:
+		return
+	var edscale := EditorInterface.get_editor_scale()
+	if list:
+		_list.icon_mode = ItemList.ICON_MODE_LEFT
+		_list.fixed_column_width = 0
+		_list.fixed_icon_size = Vector2i(int(20 * edscale), int(20 * edscale))
+		_list.max_text_lines = 1
+	else:
+		# EditorFileDialog's thumbnail_size (editor setting, default 64) is
+		# the tile size the FS dock uses; columns are 1.5x that.
+		var thumb := int(_setting("filesystem/file_dialog/thumbnail_size", 64))
+		_list.icon_mode = ItemList.ICON_MODE_TOP
+		_list.fixed_column_width = int(thumb * 1.5 * edscale)
+		_list.fixed_icon_size = Vector2i(int(thumb * edscale), int(thumb * edscale))
+		_list.max_text_lines = 2
 
 
 ## Editor settings helpers — assets2godot/* values registered by the
@@ -322,21 +320,16 @@ func _is_image(path: String) -> bool:
 	return path.get_extension().to_lower() in A2GThumbs.IMAGE_EXTS
 
 
-## Recomputes card width so each row fills the scroll view (gallery.gd math).
-func _update_columns() -> void:
-	if _scroll != null and _grid != null:
-		A2GUI.update_columns(_scroll, _grid, _border)
-
-
-## Files under res:// get the editor's own previews; everything else goes
-## through the A2G thumbnail renderer, which loads and renders them itself.
-func _queue_preview(path: String, card: Control) -> void:
+## Files under res:// get the editor's own previews — the same textures the
+## FileSystem dock's tiles show; everything else goes through the A2G
+## thumbnail renderer. The payload is {idx, path} of the list item.
+func _queue_preview(path: String, payload: Dictionary) -> void:
 	# A claimed sibling preview image wins over any generated thumbnail —
 	# it is the asset pack's intended presentation.
 	var stem := path.get_basename()
 	if _preview_map.has(stem) and not _is_image(path):
 		if _thumbs != null:
-			_thumbs.request(card, _preview_map[stem])
+			_thumbs.request(payload, _preview_map[stem])
 		return
 	var res_path := ""
 	if path.begins_with("res://"):
@@ -348,24 +341,30 @@ func _queue_preview(path: String, card: Control) -> void:
 	if res_path != "":
 		var previewer := EditorInterface.get_resource_previewer()
 		if previewer != null:
-			previewer.queue_resource_preview(res_path, self, "_on_preview", card)
+			previewer.queue_resource_preview(res_path, self, "_on_preview", payload)
 	elif _thumbs != null:
-		_thumbs.request(card, path)
+		_thumbs.request(payload, path)
 
 
-## A2GThumbs rendered a thumbnail for a file outside res://. The payload
-## card may be a freed one from before a rebuild — guard before touching.
-func _on_rendered(card, texture: Texture2D) -> void:
-	if is_instance_valid(card):
-		A2GUI.set_card_thumb(card, texture)
+## A2GThumbs rendered a thumbnail for a file outside res://. Guard against
+## stale payloads from before a rebuild: index bounds + path must match.
+func _on_rendered(payload, texture: Texture2D) -> void:
+	_set_item_thumb(payload, texture)
 
 
-func _on_preview(_path: String, preview: Texture2D, thumbnail_preview: Texture2D, card) -> void:
-	if not is_instance_valid(card):
-		return
+func _on_preview(_path: String, preview: Texture2D, thumbnail_preview: Texture2D, payload) -> void:
 	var tex: Texture2D = preview if preview else thumbnail_preview
 	if tex:
-		A2GUI.set_card_thumb(card, tex)
+		_set_item_thumb(payload, tex)
+
+
+func _set_item_thumb(payload, texture: Texture2D) -> void:
+	if not (payload is Dictionary) or _list == null:
+		return
+	var idx: int = payload.get("idx", -1)
+	if idx < 0 or idx >= _list_entries.size() or _list_entries[idx].get("path") != payload.get("path"):
+		return
+	_list.set_item_icon(idx, texture)
 
 
 ## Rebuilds the filter dropdowns from the result set, preserving selections.
