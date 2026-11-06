@@ -13,7 +13,6 @@ const CORNER_RADIUS := 8
 const TITLE_PADDING := Vector2(10, 6)
 const FRAME_WIDTH := 2
 const CARD_WIDTH := 220
-const ICON_SIZE := 64
 const STATES := ["normal", "hover", "pressed", "hover_pressed"]
 
 ## Kind -> the editor's own class icon, the same visual language the
@@ -40,6 +39,7 @@ var title_label: Label
 var frame: Panel
 
 var _kind := ""
+var _type_name := ""
 var _width := 0.0
 var _hovered := false
 var _updating_theme := false
@@ -61,10 +61,10 @@ func _init() -> void:
 	thumb_clip.add_child(thumb)
 
 	kind_icon = TextureRect.new()
-	kind_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	kind_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	kind_icon.set_anchors_preset(Control.PRESET_FULL_RECT)
+	kind_icon.expand_mode = TextureRect.EXPAND_KEEP_SIZE
+	kind_icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
 	kind_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	kind_icon.modulate = Color(1, 1, 1, 0.55)
 	thumb_clip.add_child(kind_icon)
 
 	badge = Label.new()
@@ -106,9 +106,10 @@ func _notification(what: int) -> void:
 			_layout()
 
 
-func setup(title: String, kind: String, source: String, path: String, new_payload: Variant, fallback_icon: Texture2D = null) -> void:
+func setup(title: String, kind: String, source: String, path: String, new_payload: Variant, fallback_icon: Texture2D = null, type_name: String = "") -> void:
 	payload = new_payload
 	_kind = kind
+	_type_name = type_name
 	_fallback_icon = fallback_icon
 	title_label.text = title
 	tooltip_text = "%s\n%s · %s\n%s" % [title, kind, source, path]
@@ -172,11 +173,16 @@ func _apply_theme() -> void:
 	_updating_theme = false
 
 
+## Icon resolution follows Godot's own convention: the resource/file type
+## name (EditorFileSystem.get_file_type / Resource.get_class) is an
+## EditorIcons name, so FileSystem and A2G show the same icon per type.
 func _update_kind_icon() -> void:
-	var icon_name: String = TYPE_ICONS.get(_kind, "Object")
+	var icon_name := _type_name if _type_name != "" else TYPE_ICONS.get(_kind, "File")
 	var icon: Texture2D = null
 	if has_theme_icon(icon_name, "EditorIcons"):
 		icon = get_theme_icon(icon_name, "EditorIcons")
+	elif has_theme_icon(TYPE_ICONS.get(_kind, "File"), "EditorIcons"):
+		icon = get_theme_icon(TYPE_ICONS.get(_kind, "File"), "EditorIcons")
 	elif _fallback_icon != null:
 		icon = _fallback_icon
 	kind_icon.texture = icon
@@ -196,9 +202,6 @@ func _layout() -> void:
 	thumb_clip.size = Vector2(width, width)
 	title_label.position = Vector2(0, width)
 	title_label.size = Vector2(width, size.y - width)
-	var isz := ICON_SIZE * edscale
-	kind_icon.size = Vector2(isz, isz)
-	kind_icon.position = Vector2(width - isz, width - isz) * 0.5
 	badge.size = badge.get_combined_minimum_size()
 	badge.position = Vector2(width, width) - badge.size - Vector2(6, 6) * edscale
 	frame.set_anchors_preset(Control.PRESET_FULL_RECT)

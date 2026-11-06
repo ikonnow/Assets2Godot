@@ -102,6 +102,7 @@ func _walk_fs(dir: EditorFileSystemDirectory) -> void:
 		_assets.append({
 			"name": fname,
 			"kind": A2GUI.kind_for_file(fname),
+			"type": dir.get_file_type(i),
 			"source": "project",
 			"path": dir.get_file_path(i),
 			"res": null,
@@ -144,6 +145,7 @@ func _collect_resource(res: Resource, node: Node, prop: String, depth: int) -> v
 	_assets.append({
 		"name": title,
 		"kind": A2GUI.kind_for_resource(res),
+		"type": res.get_class(),
 		"source": "scene",
 		"path": "%s:%s" % [node.get_path(), prop],
 		"res": res,
@@ -169,7 +171,7 @@ func _rebuild() -> void:
 			continue
 		if q != "" and not (str(a["name"]).to_lower().contains(q) or str(a["path"]).to_lower().contains(q)):
 			continue
-		var card := A2GUI.asset_card(a["name"], a["kind"], a["source"], a["path"], _icon)
+		var card := A2GUI.asset_card(a["name"], a["kind"], a["source"], a["path"], _icon, a["type"])
 		_grid.add_child(card)
 		_request_preview(a, card)
 		shown += 1

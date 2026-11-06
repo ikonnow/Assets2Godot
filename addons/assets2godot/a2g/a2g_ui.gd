@@ -70,9 +70,9 @@ const A2GCard = preload("res://addons/assets2godot/a2g/a2g_card.gd")
 
 ## A gallery-style card identical in look to ui/gallery/gallery_item.tscn:
 ## square clipped thumbnail, kind badge, name below, hover/focus frame.
-static func asset_card(title: String, kind: String, source: String, path: String, icon: Texture2D) -> Control:
+static func asset_card(title: String, kind: String, source: String, path: String, icon: Texture2D, type_name: String = "") -> Control:
 	var card: Control = A2GCard.new()
-	card.setup(title, kind, source, path, {"path": path, "kind": kind, "source": source}, icon)
+	card.setup(title, kind, source, path, {"path": path, "kind": kind, "source": source}, icon, type_name)
 	return card
 
 
