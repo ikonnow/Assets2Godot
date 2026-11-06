@@ -33,6 +33,7 @@ var _refresh: Button
 var _view_toggle: Button
 var _grid: GridContainer
 var _scroll: ScrollContainer
+var _border: PanelContainer
 var _list: ItemList
 var _empty: Label
 var _icon: Texture2D
@@ -88,22 +89,20 @@ func _ready() -> void:
 	_kind_filter.item_selected.connect(func(_i): _rebuild())
 	filter_row.add_child(_kind_filter)
 
-	# Scrollable card grid + empty state, inside the same NoBorderAssetLib
-	# margin chrome the BlendKit gallery uses (negative theme margins widen
-	# the scroll — keeps card math identical to content_width()).
+	# Scrollable card grid + empty state — identical chrome to
+	# gallery.tscn: Margin(NoBorderAssetLib) → Scroll → Border panel
+	# (empty stylebox, L15/T0/R35/B15) → Grid.
 	var margin := MarginContainer.new()
 	margin.theme_type_variation = "NoBorderAssetLib"
 	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(margin)
-	# The grid scroll sits in a PanelContainer — same bounded "right panel"
-	# look the FS dock's file list gets from ItemListSecondary.
-	var panel := PanelContainer.new()
-	margin.add_child(panel)
-	_scroll = ScrollContainer.new()
+	_scroll = A2GUI.make_scroll()
 	_scroll.resized.connect(_update_columns)
-	panel.add_child(_scroll)
+	margin.add_child(_scroll)
+	_border = A2GUI.make_scroll_border()
+	_scroll.add_child(_border)
 	_grid = A2GUI.make_grid()
-	_scroll.add_child(_grid)
+	_border.add_child(_grid)
 	# List view — FileSystem-dock-style rows (icon + name); the
 	# ItemListSecondary variation is the secondary bg the FS list uses.
 	_list = ItemList.new()
@@ -295,7 +294,7 @@ func _is_image(path: String) -> bool:
 ## Recomputes card width so each row fills the scroll view (gallery.gd math).
 func _update_columns() -> void:
 	if _scroll != null and _grid != null:
-		A2GUI.update_columns(_scroll, _grid)
+		A2GUI.update_columns(_scroll, _grid, _border)
 
 
 ## Files under res:// get the editor's own previews; everything else goes
