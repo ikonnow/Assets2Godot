@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="addons/blendkit/logo/blendkit-logo-hexa_pure.svg" alt="Blendkit Logo" width="100"/>
+  <img src="addons/assets2godot/logo/blendkit-logo-hexa_pure.svg" alt="Blendkit Logo" width="100"/>
   <h1 align="center">Blendkit for Godot</h1>
 
   A simple yet effective add-on that lets you import models
@@ -99,7 +99,7 @@ Download the `blendkit-godot_vX.Y.Z.zip` archive from
 (or [build](#building) your own from sources), then:
 
 1. **Extract** the ZIP into your Godot project root directory (where `project.godot` is located)
-    - **DO NOT** copy `addons/` or `addons/blendkit/` from this repo without
+    - **DO NOT** copy `addons/` or `addons/assets2godot/` from this repo without
     [building](#building) Client binaries first.
 2. Open your project in **Godot Editor**, go to **Project → Project Settings... → Plugins** tab
 3. Check **Enabled** for **Blendkit**
@@ -112,7 +112,7 @@ editor Output.
 
 Always do a **clean install** when upgrading to a new version:
 
-1. Delete the `addons/blendkit/` directory from your Godot project.
+1. Delete the `addons/assets2godot/` directory from your Godot project.
 2. Install the new version as usual (see above).
 
 This avoids stale files left over from the previous version.
@@ -263,7 +263,7 @@ auto-import.
 
 ## Directory Structure
 
-- `addons/blendkit/` - Godot plugin sources (standard Godot addon path)
+- `addons/assets2godot/` - Godot plugin sources (standard Godot addon path)
 - `bk_client/` - Blendkit Client sources (cloned on demand by `./dev.py build --from-source`)
 - `tests/` - pytest test suite
 - `out/` - Build output directory (generated)
@@ -291,7 +291,7 @@ By default this builds from a **published client release**:
 `client-dist/vX.Y.Z/` and verifies its version and manifest binary hashes
 (`./dev.py get-client-release`)
 - stages all six platform binaries before replacing the installed client, and records
-the exact version in `addons/blendkit/client/RESOLVED_VERSION`
+the exact version in `addons/assets2godot/client/RESOLVED_VERSION`
 - creates a distributable ZIP archive (`./dev.py build-archive`)
 
 Pin an exact supported client release with `./dev.py build --tag vX.Y.Z`.
@@ -353,7 +353,7 @@ Godot Editor for development and testing.
    ./dev.py build
    ```
 3. Open the project in Godot Editor
-4. Make changes to the plugin in `addons/blendkit/`
+4. Make changes to the plugin in `addons/assets2godot/`
 5. Test your changes directly in the editor
 
 Run `python dev.py` for a list of all available commands.

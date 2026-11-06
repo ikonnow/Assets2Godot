@@ -125,7 +125,7 @@ Tiny bugfix release to remove harmless Warning on startup for good.
 Major bugfix release ensuring compatibility with the new `blendkit.com` domain
 and improving Client handling.
 
-**Please upgrade** by removing the old `addons/blendkit/` directory and
+**Please upgrade** by removing the old `addons/assets2godot/` directory and
 unpacking the latest version.
 
 You can now use the **Godot Asset Store** tab in Godot 4.7+ to install the plugin.
@@ -149,14 +149,14 @@ You can now use the **Godot Asset Store** tab in Godot 4.7+ to install the plugi
 
 ## 0.5.2 - 2026-06-24
 
-Utility release which adds `addons/blendkit/LICENSE` to comply with
+Utility release which adds `addons/assets2godot/LICENSE` to comply with
 Godot Asset Store requirements.
 
 No functional changes.
 
 ### Added
 
-- Include `LICENSE` in the `addons/blendkit/` directory so it ships with the
+- Include `LICENSE` in the `addons/assets2godot/` directory so it ships with the
   addon. The root `LICENSE` remains the source of truth and is synced into the
   addon directory on build.
 
@@ -167,7 +167,7 @@ Bugfix release for the `blenderkit.com` -> `blendkit.com` migration.
 Older Clients (<= 1.9.0) will get CORS errors in the browser from `blendkit.com`
 leading to the **Send to Godot** button not showing.
 
-**Please upgrade** by removing old `addons/blendkit` directory and
+**Please upgrade** by removing old `addons/assets2godot` directory and
 unpacking the latest version.
 
 ### Changed
@@ -188,7 +188,7 @@ Renamed to **Blendkit** and improved Client connection stability.
 ### Changed
 
 - New plugin name: **Blendkit**
-  - New plugin directory: `addons/blendkit/`
+  - New plugin directory: `addons/assets2godot/`
   - On upgrade just delete old dir: `addons/blenderkit/`
 - Improved Client discovery, connection stability, and state flow.
 - Properly display reported Client's version.
