@@ -32,6 +32,7 @@ const ISSUES_URL = "https://github.com/BlenderKit/bk_godot/issues"
 
 const gallery_scene = preload("res://addons/blendkit/ui/gallery/gallery.tscn")
 const A2GDock = preload("res://addons/blendkit/a2g/a2g_dock.gd")
+const A2GBrowser = preload("res://addons/blendkit/a2g/a2g_browser.gd")
 const Auth = preload("res://addons/blendkit/auth.gd")
 const BlenderImport = preload("res://addons/blendkit/blender_import.gd")
 const ClientBinary = preload("res://addons/blendkit/client_binary.gd")
@@ -106,11 +107,8 @@ var addon_version: String
 var connection: ClientConnection
 var auth: Auth
 var gallery: Control
-var a2g_dock: Control
-## The main screen wrapper: the BlendKit gallery plus the local providers
-## surface as tabs under the "Assets2Godot" main screen tab.
-var main_tabs: TabContainer
-var a2g_tab: Control
+## The Assets2Godot main-screen tab (BlendKit stays its own tab).
+var a2g_screen: Control
 
 
 func _enter_tree() -> void:
@@ -130,9 +128,7 @@ func _enter_tree() -> void:
 	add_child(auth)
 
 	init_gallery()
-	a2g_dock = A2GDock.new()
-	a2g_dock.plugin = self
-	add_control_to_dock(DOCK_SLOT_RIGHT_UL, a2g_dock)
+	init_a2g()
 	ProjectSettings.settings_changed.connect(load_settings)
 	EditorInterface.get_editor_settings().settings_changed.connect(load_settings)
 	if client_enabled:
@@ -144,16 +140,17 @@ func _enter_tree() -> void:
 func _exit_tree() -> void:
 	ProjectSettings.settings_changed.disconnect(load_settings)
 	EditorInterface.get_editor_settings().settings_changed.disconnect(load_settings)
-	# The children go with the plugin; the tabs live in the main screen.
-	if main_tabs:
-		main_tabs.queue_free()
-		main_tabs = null
+	# The children go with the plugin; the gallery lives in the main screen.
+	if gallery:
+		gallery.queue_free()
 		gallery = null
-		a2g_tab = null
-	if a2g_dock:
-		remove_control_from_docks(a2g_dock)
-		a2g_dock.queue_free()
-		a2g_dock = null
+	if a2g_screen:
+		if a2g_screen.is_class("EditorDock"):
+			call("remove_dock", a2g_screen)
+		else:
+			remove_control_from_docks(a2g_screen)
+		a2g_screen.queue_free()
+		a2g_screen = null
 	log_info("Plugin exited")
 
 
@@ -165,12 +162,12 @@ func _has_main_screen() -> bool:
 
 
 func _make_visible(visible: bool) -> void:
-	if main_tabs:
-		main_tabs.visible = visible
+	if gallery:
+		gallery.visible = visible
 
 
 func _get_plugin_name() -> String:
-	return "Assets2Godot"
+	return "Blendkit"
 
 
 # Godot asks again on theme changes, so the icon follows the editor scale and
@@ -179,23 +176,51 @@ func _get_plugin_icon() -> Texture2D:
 	return Icons.render_svg(Icons.ICON_PATH, EditorInterface.get_editor_scale(), true)
 
 
-# The main screen is Assets2Godot: the upstream gallery stays untouched as
-# the blenderkit provider's surface, the local providers (dirs, vault)
-# live in a second tab on the same screen.
 func init_gallery() -> void:
-	main_tabs = TabContainer.new()
-	main_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	gallery = gallery_scene.instantiate()
 	gallery.plugin = self
-	gallery.name = "BlendKit"
 	gallery.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	main_tabs.add_child(gallery)
-	a2g_tab = A2GDock.new()
-	a2g_tab.plugin = self
-	a2g_tab.name = "Local Assets"
-	main_tabs.add_child(a2g_tab)
-	main_tabs.hide()
-	EditorInterface.get_editor_main_screen().add_child(main_tabs)
+	gallery.hide()
+	EditorInterface.get_editor_main_screen().add_child(gallery)
+
+
+# The Assets2Godot surface: on Godot 4.8+ an EditorDock in the main-screen
+# slot — a real "A2G" tab next to Blendkit. Older Godot (no EditorDock class)
+# gets the same content as a right-hand dock. Inside: the unified asset
+# Browser and the Local Assets management tab.
+# EditorDock.DockSlot.MAIN_SCREEN = 11; resolved dynamically so this file
+# still parses on versions without the class.
+const A2G_MAIN_SCREEN_SLOT := 11
+const A2G_ICON_PATH := "res://addons/blendkit/a2g/icon.svg"
+
+func init_a2g() -> void:
+	var tabs := TabContainer.new()
+	tabs.name = "A2G"
+	var browser := A2GBrowser.new()
+	browser.plugin = self
+	browser.name = "Browser"
+	tabs.add_child(browser)
+	var local := A2GDock.new()
+	local.plugin = self
+	local.name = "Local Assets"
+	tabs.add_child(local)
+	var icon := Icons.render_svg(A2G_ICON_PATH, EditorInterface.get_editor_scale(), true)
+	if ClassDB.class_exists("EditorDock"):
+		var dock: Control = ClassDB.instantiate("EditorDock")
+		dock.set("title", "A2G")
+		dock.set("layout_key", "a2g")
+		dock.set("default_slot", A2G_MAIN_SCREEN_SLOT)
+		dock.set("dock_icon", icon)
+		dock.set("force_show_icon", true)
+		dock.set("allow_switch_screen", true)
+		dock.add_child(tabs)
+		call("add_dock", dock)
+		a2g_screen = dock
+	else:
+		add_control_to_dock(DOCK_SLOT_RIGHT_UL, tabs)
+		if has_method("set_dock_tab_icon"):
+			set_dock_tab_icon(tabs, icon)
+		a2g_screen = tabs
 
 
 # MARK: settings
