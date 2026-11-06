@@ -18,7 +18,10 @@ var _dir_dialog: EditorFileDialog
 
 
 func _ready() -> void:
-	name = "Assets2Godot"
+	# Keep a pre-assigned name (e.g. "Local Assets" as a main-screen tab);
+	# only the auto-generated node name is replaced.
+	if name == "" or name.begins_with("@"):
+		name = "Assets2Godot"
 	var vbox := VBoxContainer.new()
 	add_child(vbox)
 
