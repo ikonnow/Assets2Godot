@@ -102,9 +102,20 @@ func _rebuild() -> void:
 			continue
 		if q != "" and not (str(a["name"]).to_lower().contains(q) or str(a["path"]).to_lower().contains(q)):
 			continue
-		_grid.add_child(A2GUI.asset_card(a["name"], a["kind"], "scene", a["path"], _icon))
+		var card := A2GUI.asset_card(a["name"], a["kind"], "scene", a["path"], _icon)
+		_grid.add_child(card)
+		var previewer := EditorInterface.get_resource_previewer()
+		if previewer:
+			previewer.queue_resource_preview(a["path"], self, "_on_preview", card)
 		shown += 1
 	_empty.visible = shown == 0
+
+
+## EditorResourcePreview delivers the real thumbnail asynchronously.
+func _on_preview(_path: String, preview: Texture2D, thumbnail_preview: Texture2D, card) -> void:
+	var tex: Texture2D = thumbnail_preview if thumbnail_preview else preview
+	if tex:
+		A2GUI.set_card_thumb(card, tex)
 
 
 func _refill_kinds() -> void:
