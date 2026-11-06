@@ -22,6 +22,7 @@ var _empty: Label
 var _icon: Texture2D
 var _thumbs: Node
 var _assets: Array = []
+var _preview_map := {}
 
 
 func _ready() -> void:
@@ -123,10 +124,15 @@ func _rebuild() -> void:
 	for c in _grid.get_children():
 		c.queue_free()
 	_refill_filters()
+	_match_previews()
 	var provider_sel: String = _provider_filter.get_item_text(_provider_filter.selected) if _provider_filter.selected >= 0 else "All"
 	var kind_sel: String = _kind_filter.get_item_text(_kind_filter.selected) if _kind_filter.selected >= 0 else "All"
 	var shown := 0
 	for a in _assets:
+		var stem := str(a.get("path", "")).get_basename()
+		# Preview images claimed by a sibling asset are not own cards.
+		if _preview_map.has(stem) and _is_image(str(a.get("path", ""))):
+			continue
 		if provider_sel != "All" and a.get("provider", "") != provider_sel:
 			continue
 		if kind_sel != "All" and a.get("kind", "") != kind_sel:
@@ -141,6 +147,36 @@ func _rebuild() -> void:
 	_update_columns()
 
 
+## Preview matchmaking: asset packs ship a curated preview image next to
+## each model (same directory, same basename — "chair.glb" + "chair.png").
+## Those images become the asset's thumbnail instead of appearing as
+## separate texture cards.
+func _match_previews() -> void:
+	_preview_map = {}
+	var by_stem := {}
+	for a in _assets:
+		var stem := str(a.get("path", "")).get_basename()
+		if stem == "":
+			continue
+		by_stem.get_or_add(stem, []).append(a)
+	for stem in by_stem:
+		var img := ""
+		var has_non_image := false
+		for a in by_stem[stem]:
+			var p := str(a.get("path", ""))
+			if _is_image(p):
+				if img == "":
+					img = p
+			else:
+				has_non_image = true
+		if has_non_image and img != "":
+			_preview_map[stem] = img
+
+
+func _is_image(path: String) -> bool:
+	return path.get_extension().to_lower() in A2GThumbs.IMAGE_EXTS
+
+
 ## Recomputes card width so each row fills the scroll view (gallery.gd math).
 func _update_columns() -> void:
 	if _scroll != null and _grid != null:
@@ -150,6 +186,13 @@ func _update_columns() -> void:
 ## Files under res:// get the editor's own previews; everything else goes
 ## through the A2G thumbnail renderer, which loads and renders them itself.
 func _queue_preview(path: String, card: Control) -> void:
+	# A claimed sibling preview image wins over any generated thumbnail —
+	# it is the asset pack's intended presentation.
+	var stem := path.get_basename()
+	if _preview_map.has(stem) and not _is_image(path):
+		if _thumbs != null:
+			_thumbs.request(card, _preview_map[stem])
+		return
 	var res_path := ""
 	if path.begins_with("res://"):
 		res_path = path
