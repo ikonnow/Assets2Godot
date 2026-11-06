@@ -21,6 +21,10 @@ var _resolution: OptionButton
 var _uuid_names: OptionButton
 var _port: OptionButton
 var _log_level: OptionButton
+var _a2g_view: OptionButton
+var _a2g_thumb: OptionButton
+var _a2g_cap: OptionButton
+var _a2g_files: CheckBox
 
 
 ## Called by the menu once the plugin is known.
@@ -80,6 +84,21 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_log_level.item_selected.connect(plugin.set_log_level)
 	_row("Log Level", _log_level, "Log level for the plugin's output.")
 
+	_section("Assets2Godot", "Local index browser and the unified Assets tab.\nSaved in your editor settings and applies to all your projects.\nAlso in Editor Settings → Assets2Godot.")
+	_a2g_view = _options(["Grid", "List"])
+	_a2g_view.item_selected.connect(func(i): _set_es("assets2godot/browser_view", i))
+	_row("Browser view", _a2g_view, "How the Assets2Godot index browser shows assets: gallery tiles or a compact list.\nThe browser toolbar's list/tile button changes the same setting.")
+	_a2g_thumb = _options(["128", "256", "512"])
+	_a2g_thumb.item_selected.connect(func(i): _set_es("assets2godot/thumb_size", [128, 256, 512][i]))
+	_row("Thumb size", _a2g_thumb, "Render size for thumbnails of files outside res://.\nApplies to thumbnails rendered after the change.")
+	_a2g_cap = _options(["50", "150", "300", "600", "1000"])
+	_a2g_cap.item_selected.connect(func(i): _set_es("assets2godot/scene_resource_cap", [50, 150, 300, 600, 1000][i]))
+	_row("Scene resources cap", _a2g_cap, "Maximum resources collected from the open scene for the Assets tab.\nHigher values cover bigger scenes at a slower collect.")
+	_a2g_files = CheckBox.new()
+	_a2g_files.text = "Show non-visual files by default"
+	_a2g_files.toggled.connect(func(on): _set_es("assets2godot/show_all_files", on))
+	_row("Show all files", _a2g_files, "Initial state of the Assets tab's 'Show all files' checkbox —\ntext files, configs and scripts that have no visual preview.")
+
 	# A sibling, as a child window would hide with Settings.
 	_blender_import_dialog = BlenderImportDialog.new()
 	get_parent().add_child(_blender_import_dialog)
@@ -100,6 +119,25 @@ func _load() -> void:
 	_uuid_names.select(GalleryApi.option_index(plugin.UUID_NAMES, plugin.uuid_names))
 	_port.select(maxi(0, ClientConnection.CLIENT_PORTS.find(plugin.preferred_port)))
 	_log_level.select(plugin.log_level)
+	_a2g_view.select(clampi(_es("assets2godot/browser_view", 0), 0, 1))
+	_a2g_thumb.select(maxi(0, [128, 256, 512].find(_es("assets2godot/thumb_size", 256))))
+	_a2g_cap.select(maxi(0, [50, 150, 300, 600, 1000].find(_es("assets2godot/scene_resource_cap", 300))))
+	_a2g_files.button_pressed = bool(_es("assets2godot/show_all_files", false))
+
+
+## Reads/writes the assets2godot/* editor settings — these rows have no
+## plugin-level side effects, so they talk to EditorSettings directly.
+func _es(key: String, fallback: Variant) -> Variant:
+	var es := EditorInterface.get_editor_settings()
+	if es and es.has_setting(key):
+		return es.get_setting(key)
+	return fallback
+
+
+func _set_es(key: String, value: Variant) -> void:
+	var es := EditorInterface.get_editor_settings()
+	if es:
+		es.set_setting(key, value)
 
 
 ## Like the Blender Import choices, warning while .blend import is on without

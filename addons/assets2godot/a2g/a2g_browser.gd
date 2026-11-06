@@ -10,19 +10,37 @@ const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
 const A2GThumbs = preload("res://addons/assets2godot/a2g/a2g_thumbs.gd")
 const SEARCH_LIMIT = 500
 
+## assets2godot/browser_view editor setting: 0 = tile grid, 1 = list.
+const SETTING_VIEW := "assets2godot/browser_view"
+enum View { GRID, LIST }
+
+## Kind → EditorIcons name for the list view's rows — same names the
+## FileSystem dock shows for those resource types.
+const LIST_ICONS := {
+	"model": "MeshInstance3D", "ue_asset": "MeshInstance3D",
+	"material": "StandardMaterial3D", "texture": "ImageTexture",
+	"hdr": "ImageTexture", "scene_data": "PackedScene",
+	"resource": "Object", "animation": "Animation", "audio": "AudioStreamWAV",
+	"script": "Script", "metadata": "TextFile", "file": "File",
+}
+
 var plugin: EditorPlugin
 
 var _search: LineEdit
 var _provider_filter: OptionButton
 var _kind_filter: OptionButton
 var _refresh: Button
+var _view_toggle: Button
 var _grid: GridContainer
 var _scroll: ScrollContainer
+var _list: ItemList
 var _empty: Label
 var _icon: Texture2D
 var _thumbs: Node
 var _assets: Array = []
 var _preview_map := {}
+var _view_mode := View.GRID
+var _list_entries: Array = []
 
 
 func _ready() -> void:
@@ -45,6 +63,14 @@ func _ready() -> void:
 	_refresh.theme_type_variation = "FlatButton"
 	_refresh.pressed.connect(_reload)
 	search_row.add_child(_refresh)
+	# Grid/list toggle — the FileSystem dock's own mode icons.
+	_view_toggle = Button.new()
+	_view_toggle.theme_type_variation = "FlatButton"
+	_view_toggle.toggle_mode = true
+	_view_toggle.pressed.connect(_toggle_view)
+	search_row.add_child(_view_toggle)
+	_view_mode = _setting(SETTING_VIEW, View.GRID)
+	_update_view_toggle()
 
 	# Filter row.
 	var filter_row := HFlowContainer.new()
@@ -74,6 +100,15 @@ func _ready() -> void:
 	margin.add_child(_scroll)
 	_grid = A2GUI.make_grid()
 	_scroll.add_child(_grid)
+	# List view — FileSystem-dock-style rows (icon + name), same margin chrome.
+	_list = ItemList.new()
+	_list.fixed_icon_size = Vector2i(int(20 * EditorInterface.get_editor_scale()),
+		int(20 * EditorInterface.get_editor_scale()))
+	_list.item_clicked.connect(_on_list_item_clicked)
+	_list.item_activated.connect(_on_list_item_activated)
+	_list.visible = _view_mode == View.LIST
+	margin.add_child(_list)
+	_scroll.visible = _view_mode == View.GRID
 	_empty = Label.new()
 	_empty.text = "No indexed assets yet.\nAdd folders and press Scan in the Local Assets tab."
 	_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -123,6 +158,8 @@ func _reload() -> void:
 func _rebuild() -> void:
 	for c in _grid.get_children():
 		c.queue_free()
+	_list.clear()
+	_list_entries.clear()
 	_refill_filters()
 	_match_previews()
 	var provider_sel: String = _provider_filter.get_item_text(_provider_filter.selected) if _provider_filter.selected >= 0 else "All"
@@ -130,21 +167,93 @@ func _rebuild() -> void:
 	var shown := 0
 	for a in _assets:
 		var stem := str(a.get("path", "")).get_basename()
-		# Preview images claimed by a sibling asset are not own cards.
+		# Preview images claimed by a sibling asset are not own entries.
 		if _preview_map.has(stem) and _is_image(str(a.get("path", ""))):
 			continue
 		if provider_sel != "All" and a.get("provider", "") != provider_sel:
 			continue
 		if kind_sel != "All" and a.get("kind", "") != kind_sel:
 			continue
-		var card := A2GUI.asset_card(a.get("name", "?"), a.get("kind", "?"),
-			a.get("provider", "?"), a.get("path", ""), _icon, "",
-			{"ext": str(a.get("path", "")).get_extension().to_lower()})
-		_grid.add_child(card)
-		_queue_preview(a.get("path", ""), card)
+		if _view_mode == View.GRID:
+			var card := A2GUI.asset_card(a.get("name", "?"), a.get("kind", "?"),
+				a.get("provider", "?"), a.get("path", ""), _icon, "",
+				{"ext": str(a.get("path", "")).get_extension().to_lower()})
+			_grid.add_child(card)
+			_queue_preview(a.get("path", ""), card)
+		else:
+			var path := str(a.get("path", ""))
+			var idx := _list.add_item("%s  ·  %s  ·  %s" % [a.get("name", "?"),
+				a.get("kind", "?"), a.get("provider", "?")], _list_icon(str(a.get("kind", ""))))
+			_list.set_item_tooltip(idx, "%s\n%s" % [path.get_file(), A2GUI.short_path(path)])
+			_list_entries.append({"path": path, "kind": a.get("kind", ""),
+				"provider": a.get("provider", ""),
+				"ext": path.get_extension().to_lower()})
 		shown += 1
 	_empty.visible = shown == 0
 	_update_columns()
+
+
+## Right-click on a list row opens the same asset context menu the cards
+## show; left-click just selects (FileSystem-dock behavior).
+func _on_list_item_clicked(index: int, _at: Vector2, mouse_button: int) -> void:
+	if mouse_button == MOUSE_BUTTON_RIGHT and index < _list_entries.size():
+		A2GUI.asset_context_menu(_list_entries[index], _list)
+
+
+## Double-click = the FileSystem dock's Open action.
+func _on_list_item_activated(index: int) -> void:
+	if index < _list_entries.size():
+		A2GUI._open_entry(_list_entries[index])
+
+
+func _list_icon(kind: String) -> Texture2D:
+	var icon_name: StringName = LIST_ICONS.get(kind, "File")
+	var theme := EditorInterface.get_editor_theme()
+	if theme and theme.has_icon(icon_name, &"EditorIcons"):
+		return theme.get_icon(icon_name, &"EditorIcons")
+	return _icon
+
+
+func _toggle_view() -> void:
+	_view_mode = View.LIST if _view_mode == View.GRID else View.GRID
+	_set_setting(SETTING_VIEW, _view_mode)
+	_update_view_toggle()
+	_rebuild()
+
+
+func _update_view_toggle() -> void:
+	var list := _view_mode == View.LIST
+	_view_toggle.button_pressed = list
+	_view_toggle.icon = _editor_icon("FileThumbnail" if list else "FileList")
+	_view_toggle.tooltip_text = ("Switch to tile view." if list
+		else "Switch to list view.")
+	# Null while _ready() runs: the controls are created after this call.
+	if _list != null:
+		_list.visible = list
+	if _scroll != null:
+		_scroll.visible = not list
+
+
+## Editor settings helpers — assets2godot/* values registered by the
+## plugin; a missing setting falls back to the given default.
+func _setting(key: String, fallback: Variant) -> Variant:
+	var es := EditorInterface.get_editor_settings()
+	if es and es.has_setting(key):
+		return es.get_setting(key)
+	return fallback
+
+
+func _set_setting(key: String, value: Variant) -> void:
+	var es := EditorInterface.get_editor_settings()
+	if es:
+		es.set_setting(key, value)
+
+
+func _editor_icon(icon_name: StringName) -> Texture2D:
+	var theme := EditorInterface.get_editor_theme()
+	if theme and theme.has_icon(icon_name, &"EditorIcons"):
+		return theme.get_icon(icon_name, &"EditorIcons")
+	return null
 
 
 ## Preview matchmaking: asset packs ship a curated preview image next to

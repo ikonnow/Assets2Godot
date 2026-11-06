@@ -12,7 +12,8 @@ extends Node
 
 signal rendered(payload: Variant, texture: Texture2D)
 
-const SIZE := 256
+const DEFAULT_SIZE := 256
+const SETTING_SIZE := "assets2godot/thumb_size"
 const PER_FRAME := 1
 const IMAGE_EXTS := ["png", "jpg", "jpeg", "tga", "bmp", "webp", "exr", "hdr", "tif", "tiff", "svg"]
 
@@ -23,8 +24,14 @@ var _queue: Array = []
 
 
 func _ready() -> void:
+	# Render size is an editor setting (Settings → Assets2Godot → Thumb
+	# size); a missing value means this code ran outside the plugin.
+	var size := DEFAULT_SIZE
+	var es := EditorInterface.get_editor_settings()
+	if es and es.has_setting(SETTING_SIZE):
+		size = int(es.get_setting(SETTING_SIZE))
 	_viewport = SubViewport.new()
-	_viewport.size = Vector2i(SIZE, SIZE)
+	_viewport.size = Vector2i(size, size)
 	_viewport.own_world_3d = true
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	add_child(_viewport)

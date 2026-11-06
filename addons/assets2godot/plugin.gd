@@ -20,6 +20,11 @@ const SETTING_UUID_NAMES = "blendkit/downloads/uuids_in_names"
 const SETTING_CLIENT_ENABLED = "blendkit/client/enabled"
 const SETTING_PORT = "blendkit/client/port"
 const SETTING_LOG_LEVEL = "blendkit/client/log_level"
+# Assets2Godot — local index browser and unified Assets tab.
+const SETTING_A2G_VIEW = "assets2godot/browser_view"
+const SETTING_A2G_THUMB_SIZE = "assets2godot/thumb_size"
+const SETTING_A2G_SCENE_CAP = "assets2godot/scene_resource_cap"
+const SETTING_A2G_SHOW_FILES = "assets2godot/show_all_files"
 # Older keys moved to the settings above.
 const OLD_SETTINGS = {"blendkit/model_format": SETTING_MODEL_FORMAT, "blendkit/resolution": SETTING_RESOLUTION}
 # Godot's enum hints can't hold an empty value, so Auto resolution "" is stored as this.
@@ -327,6 +332,10 @@ func init_settings() -> void:
 	add_editor_setting(SETTING_CLIENT_ENABLED, client_enabled)
 	add_editor_setting(SETTING_PORT, preferred_port, PROPERTY_HINT_ENUM, ",".join(ClientConnection.CLIENT_PORTS))
 	add_editor_setting(SETTING_LOG_LEVEL, log_level, PROPERTY_HINT_ENUM, ",".join(LogLevel.keys()))
+	add_editor_setting(SETTING_A2G_VIEW, 0, PROPERTY_HINT_ENUM, "Grid,List")
+	add_editor_setting(SETTING_A2G_THUMB_SIZE, 256, PROPERTY_HINT_ENUM, "128,256,512")
+	add_editor_setting(SETTING_A2G_SCENE_CAP, 300, PROPERTY_HINT_RANGE, "50,2000,50")
+	add_editor_setting(SETTING_A2G_SHOW_FILES, false)
 	# After registering, so migrated defaults aren't written to project.godot.
 	for old in OLD_SETTINGS:
 		if ProjectSettings.has_setting(old):
