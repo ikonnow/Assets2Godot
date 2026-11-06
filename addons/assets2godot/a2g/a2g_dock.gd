@@ -10,9 +10,6 @@ signal scanned
 ## endpoints and its settings store.
 
 var plugin: EditorPlugin
-## The HSplitContainer this dock shares with the browser — set by the
-## plugin so the header's split-mode button can flip its orientation.
-var split: SplitContainer
 
 var _status: Label
 var _tree: Tree
@@ -20,7 +17,6 @@ var _refresh: Button
 var _scan: Button
 var _add: Button
 var _remove: Button
-var _split_btn: Button
 var _dir_dialog: EditorFileDialog
 ## provider name → its root-level TreeItem, so scan results nest under
 ## their provider like an outliner instead of flooding the tree root.
@@ -59,12 +55,6 @@ func _ready() -> void:
 	_scan.icon = _icon("Play")
 	_scan.flat = true
 	_scan.pressed.connect(_on_scan)
-	# Same trick as the FileSystem dock's "Change Split Mode": flips the
-	# parent SplitContainer's vertical property — no rebuild needed.
-	_split_btn = _head_button(head, "", "Change split mode — sources left/right or top/bottom.")
-	_split_btn.flat = true
-	_split_btn.pressed.connect(_toggle_split)
-	_update_split_icon()
 
 	_status = Label.new()
 	_status.text = "Client: …"
@@ -239,27 +229,6 @@ func _icon(icon_name: StringName) -> Texture2D:
 
 func _icon_size() -> int:
 	return int(16 * EditorInterface.get_editor_scale())
-
-
-## The FileSystem dock's "Change Split Mode" — toggling .vertical on the
-## shared SplitContainer is all the orientation change needs.
-func _toggle_split() -> void:
-	if split == null:
-		return
-	split.vertical = not split.vertical
-	split.split_offset = int(340 * EditorInterface.get_editor_scale())
-	_update_split_icon()
-
-
-func _update_split_icon() -> void:
-	# The FS dock's split button cycles Panels1/Panels2/Panels2Alt —
-	# Panels2 = side by side, Panels2Alt = stacked (editor source,
-	# docs/research/editor_ui_parity.md §2).
-	var vertical := split != null and split.vertical
-	_split_btn.icon = _icon("Panels2Alt" if vertical else "Panels2")
-	_split_btn.text = "" if _split_btn.icon else "⇄"
-
-
 
 
 func _on_scan() -> void:

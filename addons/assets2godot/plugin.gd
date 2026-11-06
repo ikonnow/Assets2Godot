@@ -217,7 +217,9 @@ func init_gallery() -> void:
 	browser.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	a2g.add_child(browser)
 	a2g.split_offset = int(340 * EditorInterface.get_editor_scale())
-	local.split = a2g
+	# The split-mode button lives in the browser's toolbar — same spot the
+	# FileSystem dock's display_mode button sits (right end, file panel).
+	browser.split = a2g
 	# A finished scan reindexes — refresh the browser so results appear
 	# without a manual search.
 	local.scanned.connect(browser.refresh)

@@ -42,6 +42,10 @@ var _assets: Array = []
 var _preview_map := {}
 var _view_mode := View.GRID
 var _list_entries: Array = []
+var _split_btn: Button
+## The SplitContainer this browser shares with the Sources dock — set by
+## the plugin so the toolbar's split-mode button flips its orientation.
+var split: SplitContainer
 
 
 func _ready() -> void:
@@ -72,6 +76,14 @@ func _ready() -> void:
 	search_row.add_child(_view_toggle)
 	_view_mode = _setting(SETTING_VIEW, View.GRID)
 	_update_view_toggle()
+	# Split-mode toggle — the FS dock puts display_mode at the right end of
+	# the file panel's toolbar, not on the tree side.
+	_split_btn = Button.new()
+	_split_btn.theme_type_variation = "FlatButton"
+	_split_btn.tooltip_text = "Change split mode — sources left/right or top/bottom."
+	_split_btn.pressed.connect(_toggle_split)
+	search_row.add_child(_split_btn)
+	_update_split_icon()
 
 	# Filter row.
 	var filter_row := HFlowContainer.new()
@@ -224,6 +236,25 @@ func _toggle_view() -> void:
 	_set_setting(SETTING_VIEW, _view_mode)
 	_update_view_toggle()
 	_rebuild()
+
+
+## The FileSystem dock's "Change Split Mode" — toggling .vertical on the
+## shared SplitContainer is all the orientation change needs.
+func _toggle_split() -> void:
+	if split == null:
+		return
+	split.vertical = not split.vertical
+	split.split_offset = int(340 * EditorInterface.get_editor_scale())
+	_update_split_icon()
+
+
+func _update_split_icon() -> void:
+	if _split_btn == null:
+		return
+	# Panels2 = side by side, Panels2Alt = stacked — the FS dock's own icons
+	# (docs/research/editor_ui_parity.md §2).
+	var vertical := split != null and split.vertical
+	_split_btn.icon = _editor_icon("Panels2Alt" if vertical else "Panels2")
 
 
 func _update_view_toggle() -> void:
