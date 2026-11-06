@@ -7,6 +7,8 @@
 /addons/assets2godot/client
 # downloaded assets
 /bk_assets
+# godot-ai MCP addon (user-installed editor tooling, not ours)
+/addons/godot_ai
 /out
 .godot
 __pycache__

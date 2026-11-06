@@ -13,8 +13,35 @@ const MAX_RES_DEPTH := 2
 
 var plugin: EditorPlugin
 
+## Kind groups for the Type dropdown — what reads as an asset vs file
+## chaff. "Files" covers extensions/text/config/script content.
+const TYPE_GROUPS := {
+	"Models": ["model", "ue_asset"],
+	"Materials": ["material"],
+	"Textures": ["texture", "hdr"],
+	"Scenes": ["scene_data", "resource", "animation"],
+	"Audio": ["audio"],
+	"Files": ["file", "metadata", "script"],
+}
+
+## File-format groups for the Format dropdown (project files only —
+## scene resources have no file format and match "All").
+const FORMAT_EXTS := {
+	"glTF": ["gltf", "glb"],
+	"FBX": ["fbx"],
+	"OBJ": ["obj"],
+	"USD": ["usd", "usda", "usdc", "usdz"],
+	"Godot": ["tscn", "scn", "tres", "res"],
+	"Images": ["png", "jpg", "jpeg", "tga", "tif", "tiff", "bmp", "webp", "svg", "exr", "hdr"],
+	"Audio": ["wav", "ogg", "mp3", "flac"],
+}
+
 var _search: LineEdit
-var _include: OptionButton
+var _sort: OptionButton
+var _type: OptionButton
+var _source: OptionButton
+var _format: OptionButton
+var _show_files: CheckBox
 var _refresh: Button
 var _grid: GridContainer
 var _scroll: ScrollContainer
@@ -46,14 +73,15 @@ func _ready() -> void:
 
 	var filter_row := HFlowContainer.new()
 	vbox.add_child(filter_row)
-	var il := Label.new()
-	il.text = "Include:"
-	filter_row.add_child(il)
-	_include = OptionButton.new()
-	for label in ["All", "Project", "Scene"]:
-		_include.add_item(label)
-	_include.item_selected.connect(func(_i): _rebuild())
-	filter_row.add_child(_include)
+	_sort = _filter_dropdown(filter_row, "Sort:", ["Name", "Kind", "Source"])
+	_type = _filter_dropdown(filter_row, "Type:", ["All", "Models", "Materials", "Textures", "Scenes", "Audio", "Files"])
+	_source = _filter_dropdown(filter_row, "Source:", ["All", "Project", "Scene"])
+	_format = _filter_dropdown(filter_row, "Format:", ["All", "glTF", "FBX", "OBJ", "USD", "Godot", "Images", "Audio"])
+	_show_files = CheckBox.new()
+	_show_files.text = "Show all files"
+	_show_files.tooltip_text = "Also list text files, configs and scripts — kinds that have no visual preview."
+	_show_files.toggled.connect(func(_on): _rebuild())
+	filter_row.add_child(_show_files)
 
 	_scroll = ScrollContainer.new()
 	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -71,6 +99,19 @@ func _ready() -> void:
 	_icon = Icons.render_svg(A2GUI.ICON_PATH, EditorInterface.get_editor_scale(), true)
 	visibility_changed.connect(_on_visibility_changed)
 	_collect()
+
+
+## A labeled filter dropdown like the BlendKit toolbar's pairs.
+func _filter_dropdown(row: HFlowContainer, label: String, items: Array) -> OptionButton:
+	var l := Label.new()
+	l.text = label
+	row.add_child(l)
+	var dd := OptionButton.new()
+	for item in items:
+		dd.add_item(item)
+	dd.item_selected.connect(func(_i): _rebuild())
+	row.add_child(dd)
+	return dd
 
 
 ## Re-collect when the tab becomes visible so scene edits show up.
@@ -103,6 +144,7 @@ func _walk_fs(dir: EditorFileSystemDirectory) -> void:
 			"name": fname,
 			"kind": A2GUI.kind_for_file(fname),
 			"type": dir.get_file_type(i),
+			"ext": fname.get_extension().to_lower(),
 			"source": "project",
 			"path": dir.get_file_path(i),
 			"res": null,
@@ -146,6 +188,7 @@ func _collect_resource(res: Resource, node: Node, prop: String, depth: int) -> v
 		"name": title,
 		"kind": A2GUI.kind_for_resource(res),
 		"type": res.get_class(),
+		"ext": "",
 		"source": "scene",
 		"path": "%s:%s" % [node.get_path(), prop],
 		"res": res,
@@ -161,13 +204,21 @@ func _collect_resource(res: Resource, node: Node, prop: String, depth: int) -> v
 func _rebuild() -> void:
 	for c in _grid.get_children():
 		c.queue_free()
-	var inc_sel: String = _include.get_item_text(_include.selected) if _include.selected >= 0 else "All"
+	var src_sel := _sel(_source, "All")
+	var type_sel := _sel(_type, "All")
+	var fmt_sel := _sel(_format, "All")
 	var q := _search.text.to_lower()
+	var list := _assets.duplicate()
+	list.sort_custom(_sort_cmp.bind(_sel(_sort, "Name")))
 	var shown := 0
-	for a in _assets:
-		if inc_sel == "Project" and a["source"] != "project":
+	for a in list:
+		if src_sel != "All" and a["source"] != src_sel.to_lower():
 			continue
-		if inc_sel == "Scene" and a["source"] != "scene":
+		if type_sel != "All" and a["kind"] not in TYPE_GROUPS.get(type_sel, []):
+			continue
+		if type_sel != "Files" and not _show_files.button_pressed and a["kind"] not in A2GUI.VISUAL_KINDS:
+			continue
+		if fmt_sel != "All" and a["ext"] not in FORMAT_EXTS.get(fmt_sel, []):
 			continue
 		if q != "" and not (str(a["name"]).to_lower().contains(q) or str(a["path"]).to_lower().contains(q)):
 			continue
@@ -177,6 +228,20 @@ func _rebuild() -> void:
 		shown += 1
 	_empty.visible = shown == 0
 	_update_columns()
+
+
+func _sel(dd: OptionButton, fallback: String) -> String:
+	return dd.get_item_text(dd.selected) if dd.selected >= 0 else fallback
+
+
+## Sort comparators for the Sort dropdown.
+func _sort_cmp(a: Dictionary, b: Dictionary, mode: String) -> bool:
+	match mode:
+		"Kind":
+			return [a["kind"], a["name"]] < [b["kind"], b["name"]]
+		"Source":
+			return [a["source"], a["name"]] < [b["source"], b["name"]]
+	return a["name"].naturalnocasecmp_to(b["name"]) < 0
 
 
 ## Recomputes card width so each row fills the scroll view (gallery.gd math).
@@ -199,6 +264,6 @@ func _request_preview(a: Dictionary, card: Control) -> void:
 
 
 func _on_preview(_path: String, preview: Texture2D, thumbnail_preview: Texture2D, card) -> void:
-	var tex: Texture2D = thumbnail_preview if thumbnail_preview else preview
+	var tex: Texture2D = preview if preview else thumbnail_preview
 	if tex:
 		A2GUI.set_card_thumb(card, tex)
