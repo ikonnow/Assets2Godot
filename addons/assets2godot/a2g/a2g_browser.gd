@@ -61,11 +61,16 @@ func _ready() -> void:
 	_kind_filter.item_selected.connect(func(_i): _rebuild())
 	filter_row.add_child(_kind_filter)
 
-	# Scrollable card grid + empty state.
+	# Scrollable card grid + empty state, inside the same NoBorderAssetLib
+	# margin chrome the BlendKit gallery uses (negative theme margins widen
+	# the scroll — keeps card math identical to content_width()).
+	var margin := MarginContainer.new()
+	margin.theme_type_variation = "NoBorderAssetLib"
+	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(margin)
 	_scroll = ScrollContainer.new()
-	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_scroll.resized.connect(_update_columns)
-	vbox.add_child(_scroll)
+	margin.add_child(_scroll)
 	_grid = A2GUI.make_grid()
 	_scroll.add_child(_grid)
 	_empty = Label.new()

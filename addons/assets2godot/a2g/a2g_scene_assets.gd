@@ -83,10 +83,16 @@ func _ready() -> void:
 	_show_files.toggled.connect(func(_on): _rebuild())
 	filter_row.add_child(_show_files)
 
+	# Same chrome as the BlendKit gallery: the scroll sits inside a
+	# NoBorderAssetLib MarginContainer (negative editor-theme margins make
+	# the scroll wider than its slot — matching content_width() upstream).
+	var margin := MarginContainer.new()
+	margin.theme_type_variation = "NoBorderAssetLib"
+	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(margin)
 	_scroll = ScrollContainer.new()
-	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_scroll.resized.connect(_update_columns)
-	vbox.add_child(_scroll)
+	margin.add_child(_scroll)
 	_grid = A2GUI.make_grid()
 	_scroll.add_child(_grid)
 	_empty = Label.new()
