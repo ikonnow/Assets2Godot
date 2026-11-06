@@ -94,7 +94,9 @@ func _update_state() -> void:
 	_refresh.disabled = not connected
 	_scan.disabled = not connected
 	_add.disabled = not connected
-	_remove.disabled = not connected or _selected_root() == null
+	var sel = _selected_root()
+	_remove.disabled = not connected or sel == null
+	_remove.text = "Adopt" if sel != null and sel.get("candidate", false) else "Remove"
 
 
 ## The selected tree row's {"provider","root"} metadata, or null when the
@@ -105,7 +107,8 @@ func _selected_root() -> Variant:
 		return null
 	if item.get_meta("provider") == null or item.get_meta("root") == null:
 		return null
-	return {"provider": item.get_meta("provider"), "root": item.get_meta("root")}
+	return {"provider": item.get_meta("provider"), "root": item.get_meta("root"),
+		"candidate": item.get_meta("candidate") == true}
 
 
 ## Fires a GET for [param endpoint] and calls [param cb] with the decoded JSON
@@ -177,7 +180,10 @@ func _fill_status(item: TreeItem, pname: String, st) -> void:
 		if r.get("exists", false) and not in_roots:
 			var child := _tree.create_item(item)
 			child.set_text(0, "[?] " + str(r.get("path", "")))
-			child.set_tooltip_text(0, "detected, not configured")
+			child.set_tooltip_text(0, "detected, not configured — select and Adopt to scan it")
+			child.set_meta("provider", pname)
+			child.set_meta("root", str(r.get("path", "")))
+			child.set_meta("candidate", true)
 	if st.get("index_available") == false:
 		var child := _tree.create_item(item)
 		child.set_text(0, "index unavailable")
@@ -237,6 +243,8 @@ func _on_remove() -> void:
 		for r in st.get("roots", []):
 			if r.get("path", "") != sel["root"]:
 				roots.append(r.get("path", ""))
+		if sel.get("candidate", false) and not roots.has(sel["root"]):
+			roots.append(sel["root"])
 		_post("providers/%s/roots" % pname, {"roots": roots}, func(_st):
 			_on_refresh()))
 
