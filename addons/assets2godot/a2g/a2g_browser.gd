@@ -16,7 +16,8 @@ var _search: LineEdit
 var _provider_filter: OptionButton
 var _kind_filter: OptionButton
 var _refresh: Button
-var _grid: HFlowContainer
+var _grid: GridContainer
+var _scroll: ScrollContainer
 var _empty: Label
 var _icon: Texture2D
 var _thumbs: Node
@@ -61,13 +62,12 @@ func _ready() -> void:
 	filter_row.add_child(_kind_filter)
 
 	# Scrollable card grid + empty state.
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	vbox.add_child(scroll)
-	_grid = HFlowContainer.new()
-	_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.add_child(_grid)
+	_scroll = ScrollContainer.new()
+	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_scroll.resized.connect(_update_columns)
+	vbox.add_child(_scroll)
+	_grid = A2GUI.make_grid()
+	_scroll.add_child(_grid)
 	_empty = Label.new()
 	_empty.text = "No indexed assets yet.\nAdd folders and press Scan in the Local Assets tab."
 	_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -126,6 +126,13 @@ func _rebuild() -> void:
 		_queue_preview(a.get("path", ""), card)
 		shown += 1
 	_empty.visible = shown == 0
+	_update_columns()
+
+
+## Recomputes card width so each row fills the scroll view (gallery.gd math).
+func _update_columns() -> void:
+	if _scroll != null and _grid != null:
+		A2GUI.update_columns(_scroll, _grid)
 
 
 ## Files under res:// get the editor's own previews; everything else goes

@@ -80,3 +80,31 @@ static func asset_card(title: String, kind: String, source: String, path: String
 static func set_card_thumb(card: Control, texture: Texture2D) -> void:
 	if is_instance_valid(card) and card.has_method("set_thumbnail"):
 		card.set_thumbnail(texture)
+
+
+const GRID_GAP := 16
+
+
+## The same column math as ui/gallery/gallery.gd's update_columns(): cards
+## are widened so every row fills the scroll view exactly, minimum
+## A2GCard.MIN_WIDTH * editor scale.
+static func update_columns(scroll: ScrollContainer, grid: GridContainer) -> void:
+	var min_width := A2GCard.MIN_WIDTH * EditorInterface.get_editor_scale()
+	var separation := grid.get_theme_constant("h_separation")
+	var available := scroll.size.x
+	var columns := maxi(1, int((available + separation) / (min_width + separation)))
+	var width := maxf(min_width, floorf((available + separation) / columns - separation))
+	if grid.columns != columns:
+		grid.columns = columns
+	for c in grid.get_children():
+		c.set_width(width)
+
+
+## A GridContainer configured like the gallery's grid (gap = GAP * scale).
+static func make_grid() -> GridContainer:
+	var grid := GridContainer.new()
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var gap := int(GRID_GAP * EditorInterface.get_editor_scale())
+	grid.add_theme_constant_override("h_separation", gap)
+	grid.add_theme_constant_override("v_separation", gap)
+	return grid
