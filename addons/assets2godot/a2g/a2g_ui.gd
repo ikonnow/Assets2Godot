@@ -16,7 +16,9 @@ const KIND_BY_EXT := {
 	"svg": "texture",
 	"exr": "hdr", "hdr": "hdr",
 	"mtlx": "material", "tres": "scene_data", "scn": "scene_data",
-	"tscn": "scene_data", "gd": "scene_data", "gdshader": "scene_data",
+	"tscn": "scene_data",
+	"gd": "script", "gdshader": "script", "cs": "script",
+	"wav": "audio", "ogg": "audio", "mp3": "audio", "flac": "audio",
 	"json": "metadata",
 }
 
@@ -49,6 +51,21 @@ static func kind_for_resource(res: Resource) -> String:
 		return "scene_data"
 	return "resource"
 
+## Kinds that read as visual/playable assets — everything else (text
+## files, configs, scripts) only shows when the user asks for it.
+const VISUAL_KINDS := ["model", "ue_asset", "material", "texture", "hdr",
+	"scene_data", "resource", "animation", "audio"]
+
+
+## Middle-elides long paths for tooltips: keeps head and tail so the file
+## name stays readable ("res://…/a2g/scene.gd").
+static func short_path(path: String, max_len := 56) -> String:
+	if path.length() <= max_len:
+		return path
+	var keep := (max_len - 3) / 2
+	return path.left(keep) + "…" + path.right(keep)
+
+
 const GALLERY_ITEM := preload("res://addons/assets2godot/ui/gallery/gallery_item.tscn")
 const GalleryItemScript = preload("res://addons/assets2godot/ui/gallery/gallery_item.gd")
 
@@ -58,7 +75,7 @@ const GalleryItemScript = preload("res://addons/assets2godot/ui/gallery/gallery_
 ## A2G surface is pixel-identical by construction.
 static func asset_card(title: String, kind: String, source: String, path: String, _icon: Texture2D, type_name: String = "") -> Control:
 	var item: Control = GALLERY_ITEM.instantiate()
-	item.setup_a2g(title, kind, type_name, "%s\n%s · %s\n%s" % [title, kind, source, path],
+	item.setup_a2g(title, kind, type_name, "%s\n%s · %s\n%s" % [title, kind, source, short_path(path)],
 		{"path": path, "kind": kind, "source": source})
 	return item
 
@@ -71,11 +88,13 @@ static func set_card_thumb(card: Control, texture: Texture2D) -> void:
 
 ## The same column math as ui/gallery/gallery.gd's update_columns(): cards
 ## are widened so every row fills the scroll view exactly, minimum
-## GalleryItem.MIN_WIDTH * editor scale.
+## GalleryItem.MIN_WIDTH * editor scale. Available width deducts the
+## vertical scrollbar, like upstream's content_width().
 static func update_columns(scroll: ScrollContainer, grid: GridContainer) -> void:
 	var min_width := GalleryItemScript.MIN_WIDTH * EditorInterface.get_editor_scale()
 	var separation := grid.get_theme_constant("h_separation")
-	var available := scroll.size.x
+	var vbar: VScrollBar = scroll.get_v_scroll_bar()
+	var available := scroll.size.x - vbar.size.x
 	var columns := maxi(1, int((available + separation) / (min_width + separation)))
 	var width := maxf(min_width, floorf((available + separation) / columns - separation))
 	if grid.columns != columns:

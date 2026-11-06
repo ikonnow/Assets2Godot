@@ -159,7 +159,7 @@ func _on_rendered(card, texture: Texture2D) -> void:
 
 
 func _on_preview(_path: String, preview: Texture2D, thumbnail_preview: Texture2D, card) -> void:
-	var tex: Texture2D = thumbnail_preview if thumbnail_preview else preview
+	var tex: Texture2D = preview if preview else thumbnail_preview
 	if tex:
 		A2GUI.set_card_thumb(card, tex)
 
