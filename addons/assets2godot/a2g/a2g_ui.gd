@@ -263,8 +263,11 @@ static func _open_entry(entry: Dictionary) -> void:
 		EditorInterface.edit_resource(res)
 
 
-## Sets the real preview texture on a card built by asset_card().
-static func set_card_thumb(card: Control, texture: Texture2D) -> void:
+## Sets the real preview texture on a card built by asset_card(). The card
+## param stays untyped on purpose: preview callbacks can fire after a
+## rebuild freed the card, and a typed parameter would reject freed
+## objects before is_instance_valid() could guard them.
+static func set_card_thumb(card, texture: Texture2D) -> void:
 	if is_instance_valid(card) and card.has_method("set_thumb_texture"):
 		card.set_thumb_texture(texture)
 

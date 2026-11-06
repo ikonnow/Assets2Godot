@@ -317,12 +317,16 @@ func _queue_preview(path: String, card: Control) -> void:
 		_thumbs.request(card, path)
 
 
-## A2GThumbs rendered a thumbnail for a file outside res://.
+## A2GThumbs rendered a thumbnail for a file outside res://. The payload
+## card may be a freed one from before a rebuild — guard before touching.
 func _on_rendered(card, texture: Texture2D) -> void:
-	A2GUI.set_card_thumb(card, texture)
+	if is_instance_valid(card):
+		A2GUI.set_card_thumb(card, texture)
 
 
 func _on_preview(_path: String, preview: Texture2D, thumbnail_preview: Texture2D, card) -> void:
+	if not is_instance_valid(card):
+		return
 	var tex: Texture2D = preview if preview else thumbnail_preview
 	if tex:
 		A2GUI.set_card_thumb(card, tex)

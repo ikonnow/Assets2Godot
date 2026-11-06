@@ -15,12 +15,17 @@ signal rendered(payload: Variant, texture: Texture2D)
 const DEFAULT_SIZE := 256
 const SETTING_SIZE := "assets2godot/thumb_size"
 const PER_FRAME := 1
+const CACHE_MAX := 256
 const IMAGE_EXTS := ["png", "jpg", "jpeg", "tga", "bmp", "webp", "exr", "hdr", "tif", "tiff", "svg"]
 
 var _viewport: SubViewport
 var _camera: Camera3D
 var _holder: Node3D
 var _queue: Array = []
+## path → rendered texture. A rebuild re-requests every card — without a
+## cache each one re-runs GLTFDocument, which makes the editor's importer
+## log "can't reimport" noise for every external file every time.
+var _cache := {}
 
 
 func _ready() -> void:
@@ -65,6 +70,9 @@ func _ready() -> void:
 ## rendered() once done; files with no renderable content are skipped
 ## silently (the card keeps its placeholder).
 func request(payload: Variant, path: String) -> void:
+	if _cache.has(path):
+		rendered.emit(payload, _cache[path])
+		return
 	_queue.append({"payload": payload, "path": path})
 	set_process(true)
 
@@ -74,6 +82,9 @@ func _process(_delta: float) -> void:
 		var item: Dictionary = _queue.pop_front()
 		var tex := _render_path(item["path"])
 		if tex != null:
+			if _cache.size() >= CACHE_MAX:
+				_cache.clear()
+			_cache[item["path"]] = tex
 			rendered.emit(item["payload"], tex)
 	if _queue.is_empty():
 		set_process(false)
