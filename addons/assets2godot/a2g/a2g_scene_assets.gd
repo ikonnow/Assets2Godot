@@ -49,6 +49,7 @@ var _mtime_cache := {}
 var _refresh: Button
 var _grid: GridContainer
 var _scroll: ScrollContainer
+var _border: PanelContainer
 var _empty: Label
 var _icon: Texture2D
 var _assets: Array = []
@@ -96,22 +97,21 @@ func _ready() -> void:
 	_show_files.toggled.connect(func(_on): _rebuild())
 	filter_row.add_child(_show_files)
 
-	# Same chrome as the BlendKit gallery: the scroll sits inside a
-	# NoBorderAssetLib MarginContainer (negative editor-theme margins make
-	# the scroll wider than its slot — matching content_width() upstream).
+	# Same chrome as the BlendKit gallery: Margin(NoBorderAssetLib) → Scroll
+	# → Border panel (empty stylebox, upstream's L15/T0/R35/B15 margins)
+	# → Grid. The border lives INSIDE the scroll — identical to
+	# gallery.tscn's LibraryMargin/Scroll/Border chain.
 	var margin := MarginContainer.new()
 	margin.theme_type_variation = "NoBorderAssetLib"
 	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(margin)
-	# Bounded panel behind the scroll — the "right panel" look the
-	# FileSystem dock gives its file list.
-	var panel := PanelContainer.new()
-	margin.add_child(panel)
-	_scroll = ScrollContainer.new()
+	_scroll = A2GUI.make_scroll()
 	_scroll.resized.connect(_update_columns)
-	panel.add_child(_scroll)
+	margin.add_child(_scroll)
+	_border = A2GUI.make_scroll_border()
+	_scroll.add_child(_border)
 	_grid = A2GUI.make_grid()
-	_scroll.add_child(_grid)
+	_border.add_child(_grid)
 	_empty = Label.new()
 	_empty.text = "No assets found."
 	_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -306,8 +306,8 @@ func _mtime_of(a: Dictionary) -> int:
 
 ## Recomputes card width so each row fills the scroll view (gallery.gd math).
 func _update_columns() -> void:
-	if _scroll != null and _grid != null:
-		A2GUI.update_columns(_scroll, _grid)
+	if _scroll != null and _grid != null and _border != null:
+		A2GUI.update_columns(_scroll, _grid, _border)
 
 
 ## File assets get a real thumbnail via the editor previewer; in-memory

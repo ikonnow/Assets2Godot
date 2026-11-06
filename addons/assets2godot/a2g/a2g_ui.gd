@@ -280,13 +280,14 @@ static func set_card_thumb(card, texture: Texture2D) -> void:
 
 ## The same column math as ui/gallery/gallery.gd's update_columns(): cards
 ## are widened so every row fills the scroll view exactly, minimum
-## GalleryItem.MIN_WIDTH * editor scale. Available width deducts the
-## vertical scrollbar, like upstream's content_width().
-static func update_columns(scroll: ScrollContainer, grid: GridContainer) -> void:
+## GalleryItem.MIN_WIDTH * editor scale. Available width = scroll minus the
+## inner Border panel's content margins minus the vertical scrollbar —
+## identical to upstream's content_width() - vbar.
+static func update_columns(scroll: ScrollContainer, grid: GridContainer, border: PanelContainer) -> void:
 	var min_width := GalleryItemScript.MIN_WIDTH * EditorInterface.get_editor_scale()
 	var separation := grid.get_theme_constant("h_separation")
 	var vbar: VScrollBar = scroll.get_v_scroll_bar()
-	var available := scroll.size.x - vbar.size.x
+	var available := scroll.size.x - border.get_theme_stylebox("panel").get_minimum_size().x - vbar.size.x
 	var columns := maxi(1, int((available + separation) / (min_width + separation)))
 	var width := maxf(min_width, floorf((available + separation) / columns - separation))
 	if grid.columns != columns:
@@ -295,10 +296,36 @@ static func update_columns(scroll: ScrollContainer, grid: GridContainer) -> void
 		c.set_width(width)
 
 
-## A GridContainer configured like the gallery's grid (gap = GAP * scale).
+## The gallery.tscn chrome around a card grid: a Border PanelContainer
+## inside the ScrollContainer whose StyleBoxEmpty panel carries the
+## content margins upstream sets at runtime (L15/T0/R35/B15 * scale).
+## Returns the border; the scroll content goes inside it.
+static func make_scroll_border() -> PanelContainer:
+	var border := PanelContainer.new()
+	border.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	border.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var edscale := EditorInterface.get_editor_scale()
+	var style := StyleBoxEmpty.new()
+	style.content_margin_left = 15 * edscale
+	style.content_margin_top = 0
+	style.content_margin_right = 35 * edscale
+	style.content_margin_bottom = 15 * edscale
+	border.add_theme_stylebox_override("panel", style)
+	return border
+
+
+## A ScrollContainer configured like the gallery's Scroll node.
+static func make_scroll() -> ScrollContainer:
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	return scroll
+
+
+## A GridContainer configured like the gallery's grid (gap = GAP * scale,
+## shrink-centered like gallery.tscn's Grid node).
 static func make_grid() -> GridContainer:
 	var grid := GridContainer.new()
-	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var gap := int(GalleryItemScript.GAP * EditorInterface.get_editor_scale())
 	grid.add_theme_constant_override("h_separation", gap)
 	grid.add_theme_constant_override("v_separation", gap)
