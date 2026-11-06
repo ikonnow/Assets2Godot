@@ -38,10 +38,13 @@ const FORMAT_EXTS := {
 
 var _search: LineEdit
 var _sort: OptionButton
+var _dir: OptionButton
 var _type: OptionButton
 var _source: OptionButton
 var _format: OptionButton
 var _show_files: CheckBox
+var _size_cache := {}
+var _mtime_cache := {}
 var _refresh: Button
 var _grid: GridContainer
 var _scroll: ScrollContainer
@@ -73,7 +76,15 @@ func _ready() -> void:
 
 	var filter_row := HFlowContainer.new()
 	vbox.add_child(filter_row)
-	_sort = _filter_dropdown(filter_row, "Sort:", ["Name", "Kind", "Source"])
+	# Sort criteria mirror the Godot FileSystem dock's sort menu:
+	# Name / Type / Last Modified / Size + a direction toggle.
+	_sort = _filter_dropdown(filter_row, "Sort:", ["Name", "Type", "Last Modified", "Size"])
+	_dir = OptionButton.new()
+	_dir.add_item("Asc")
+	_dir.add_item("Desc")
+	_dir.selected = 0
+	_dir.item_selected.connect(func(_i): _rebuild())
+	filter_row.add_child(_dir)
 	_type = _filter_dropdown(filter_row, "Type:", ["All", "Models", "Materials", "Textures", "Scenes", "Audio", "Files"])
 	_source = _filter_dropdown(filter_row, "Source:", ["All", "Project", "Scene"])
 	_format = _filter_dropdown(filter_row, "Format:", ["All", "glTF", "FBX", "OBJ", "USD", "Godot", "Images", "Audio"])
@@ -131,6 +142,8 @@ func _on_visibility_changed() -> void:
 func _collect() -> void:
 	_assets = []
 	_seen = {}
+	_size_cache = {}
+	_mtime_cache = {}
 	_collect_project()
 	_collect_scene()
 	_rebuild()
@@ -242,14 +255,47 @@ func _sel(dd: OptionButton, fallback: String) -> String:
 	return dd.get_item_text(dd.selected) if dd.selected >= 0 else fallback
 
 
-## Sort comparators for the Sort dropdown.
+## Sort comparators — same criteria set as the FileSystem dock menu.
+## File size and mtime are resolved lazily and cached (0 for in-memory
+## scene resources, so they group together at one end).
 func _sort_cmp(a: Dictionary, b: Dictionary, mode: String) -> bool:
+	var lt := false
 	match mode:
-		"Kind":
-			return [a["kind"], a["name"]] < [b["kind"], b["name"]]
-		"Source":
-			return [a["source"], a["name"]] < [b["source"], b["name"]]
-	return a["name"].naturalnocasecmp_to(b["name"]) < 0
+		"Type":
+			lt = str(a["type"]).naturalnocasecmp_to(str(b["type"])) < 0
+		"Size":
+			lt = _size_of(a) < _size_of(b)
+		"Last Modified":
+			lt = _mtime_of(a) < _mtime_of(b)
+		_:
+			lt = str(a["name"]).naturalnocasecmp_to(str(b["name"])) < 0
+	return not lt if _dir != null and _dir.selected == 1 else lt
+
+
+func _size_of(a: Dictionary) -> int:
+	var path := str(a.get("path", ""))
+	if not path.begins_with("res://"):
+		return 0
+	if _size_cache.has(path):
+		return _size_cache[path]
+	var size := 0
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f != null:
+		size = f.get_length()
+		f.close()
+	_size_cache[path] = size
+	return size
+
+
+func _mtime_of(a: Dictionary) -> int:
+	var path := str(a.get("path", ""))
+	if not path.begins_with("res://"):
+		return 0
+	if _mtime_cache.has(path):
+		return _mtime_cache[path]
+	var mtime := int(FileAccess.get_modified_time(path))
+	_mtime_cache[path] = mtime
+	return mtime
 
 
 ## Recomputes card width so each row fills the scroll view (gallery.gd math).
