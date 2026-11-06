@@ -65,60 +65,18 @@ static func kind_color(kind: String) -> Color:
 		_: return Color(0.3, 0.3, 0.34, 0.8)
 
 
-## A gallery-style card: full-bleed thumb area (kind-colored placeholder
-## with the A2G icon until a real preview arrives via set_card_thumb),
-## then title and a source·kind meta line.
+const A2GCard = preload("res://addons/assets2godot/a2g/a2g_card.gd")
+
+
+## A gallery-style card identical in look to ui/gallery/gallery_item.tscn:
+## square clipped thumbnail, kind badge, name below, hover/focus frame.
 static func asset_card(title: String, kind: String, source: String, path: String, icon: Texture2D) -> Control:
-	var card := PanelContainer.new()
-	card.custom_minimum_size = Vector2(230, 250)
-	card.tooltip_text = "%s\n%s" % [path, source]
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 4)
-	card.add_child(vbox)
-
-	# Thumbnail: clip panel, kind color behind, cube icon centered as
-	# placeholder, real preview covering on top when it arrives.
-	var clip := Panel.new()
-	clip.clip_children = CanvasItem.CLIP_CHILDREN_ONLY
-	clip.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	clip.custom_minimum_size = Vector2(0, 170)
-	var style := StyleBoxFlat.new()
-	style.bg_color = kind_color(kind)
-	style.corner_radius_top_left = 6
-	style.corner_radius_top_right = 6
-	clip.add_theme_stylebox_override("panel", style)
-	var bg := TextureRect.new()
-	bg.texture = icon
-	bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	bg.custom_minimum_size = Vector2(48, 48)
-	bg.set_anchors_preset(Control.PRESET_CENTER)
-	clip.add_child(bg)
-	var tex := TextureRect.new()
-	tex.set_anchors_preset(Control.PRESET_FULL_RECT)
-	tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	clip.add_child(tex)
-	card.set_meta("thumb", tex)
-	vbox.add_child(clip)
-
-	var name_label := Label.new()
-	name_label.text = title
-	name_label.clip_text = true
-	name_label.tooltip_text = title
-	vbox.add_child(name_label)
-	var meta := Label.new()
-	meta.text = "%s · %s" % [kind, source]
-	meta.add_theme_font_size_override("font_size", 11)
-	meta.modulate = Color(1, 1, 1, 0.6)
-	vbox.add_child(meta)
+	var card: Control = A2GCard.new()
+	card.setup(title, kind, source, path, {"path": path, "kind": kind, "source": source}, icon)
 	return card
 
 
 ## Sets the real preview texture on a card built by asset_card().
 static func set_card_thumb(card: Control, texture: Texture2D) -> void:
-	if not is_instance_valid(card):
-		return
-	var t = card.get_meta("thumb", null)
-	if t is TextureRect:
-		t.texture = texture
+	if is_instance_valid(card) and card.has_method("set_thumbnail"):
+		card.set_thumbnail(texture)

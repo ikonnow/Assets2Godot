@@ -7,6 +7,7 @@ extends PanelContainer
 
 const Icons = preload("res://addons/assets2godot/ui/icons.gd")
 const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
+const A2GThumbs = preload("res://addons/assets2godot/a2g/a2g_thumbs.gd")
 const SEARCH_LIMIT = 500
 
 var plugin: EditorPlugin
@@ -18,6 +19,7 @@ var _refresh: Button
 var _grid: HFlowContainer
 var _empty: Label
 var _icon: Texture2D
+var _thumbs: Node
 var _assets: Array = []
 
 
@@ -74,6 +76,9 @@ func _ready() -> void:
 	vbox.add_child(_empty)
 
 	_icon = Icons.render_svg(A2GUI.ICON_PATH, EditorInterface.get_editor_scale(), true)
+	_thumbs = A2GThumbs.new()
+	_thumbs.rendered.connect(_on_rendered)
+	add_child(_thumbs)
 	if plugin.connection:
 		plugin.connection.connected.connect(_reload)
 	_update_state()
@@ -123,12 +128,9 @@ func _rebuild() -> void:
 	_empty.visible = shown == 0
 
 
-## Real previews work only for resources inside res:// — indexed files
-## under the project dir (e.g. res://bk_assets) qualify too.
+## Files under res:// get the editor's own previews; everything else goes
+## through the A2G thumbnail renderer, which loads and renders them itself.
 func _queue_preview(path: String, card: Control) -> void:
-	var previewer := EditorInterface.get_resource_previewer()
-	if previewer == null:
-		return
 	var res_path := ""
 	if path.begins_with("res://"):
 		res_path = path
@@ -137,7 +139,16 @@ func _queue_preview(path: String, card: Control) -> void:
 		if path.begins_with(proj):
 			res_path = "res://" + path.substr(proj.length())
 	if res_path != "":
-		previewer.queue_resource_preview(res_path, self, "_on_preview", card)
+		var previewer := EditorInterface.get_resource_previewer()
+		if previewer != null:
+			previewer.queue_resource_preview(res_path, self, "_on_preview", card)
+	elif _thumbs != null:
+		_thumbs.request(card, path)
+
+
+## A2GThumbs rendered a thumbnail for a file outside res://.
+func _on_rendered(card, texture: Texture2D) -> void:
+	A2GUI.set_card_thumb(card, texture)
 
 
 func _on_preview(_path: String, preview: Texture2D, thumbnail_preview: Texture2D, card) -> void:
