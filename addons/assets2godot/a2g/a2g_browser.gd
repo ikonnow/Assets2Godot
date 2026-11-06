@@ -108,6 +108,9 @@ func _ready() -> void:
 	vbox.add_child(margin)
 	_list = ItemList.new()
 	_list.theme_type_variation = "ItemListSecondary"
+	# Right-click selects the row under the cursor before the context menu
+	# opens — same as FileSystemTree's allow_rmb_select.
+	_list.allow_rmb_select = true
 	_list.same_column_width = true
 	_list.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_list.item_clicked.connect(_on_list_item_clicked)
