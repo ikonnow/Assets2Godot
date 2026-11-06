@@ -200,14 +200,21 @@ func init_gallery() -> void:
 	main_tabs.add_child(scene_assets)
 	var a2g := HSplitContainer.new()
 	a2g.name = "Assets2Godot"
+	# Dock-style dragger: the editor theme's split separation is a few px —
+	# technically draggable but undiscoverable. A fatter strip + the visible
+	# grab handle reads like the Scene/FileSystem split.
+	a2g.dragger_visibility = SplitContainer.DRAGGER_VISIBLE
+	a2g.add_theme_constant_override("separation", int(8 * EditorInterface.get_editor_scale()))
 	var local := A2GDock.new()
 	local.plugin = self
-	local.custom_minimum_size = Vector2(300, 0)
+	local.custom_minimum_size = Vector2(280, 0)
 	a2g.add_child(local)
 	var browser := A2GBrowser.new()
 	browser.plugin = self
+	browser.custom_minimum_size = Vector2(400, 0)
 	browser.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	a2g.add_child(browser)
+	a2g.split_offset = int(340 * EditorInterface.get_editor_scale())
 	# A finished scan reindexes — refresh the browser so results appear
 	# without a manual search.
 	local.scanned.connect(browser.refresh)
