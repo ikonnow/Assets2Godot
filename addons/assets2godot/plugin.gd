@@ -203,6 +203,9 @@ func init_gallery() -> void:
 	browser.plugin = self
 	browser.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	a2g.add_child(browser)
+	# A finished scan reindexes — refresh the browser so results appear
+	# without a manual search.
+	local.scanned.connect(browser.refresh)
 	main_tabs.add_child(a2g)
 	# A2G entries inside Godot's own context menus — FileSystem dock
 	# ("Scan folder as root") and Scene tree ("Show scene resources").

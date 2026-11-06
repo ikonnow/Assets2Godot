@@ -1,5 +1,9 @@
 @tool
 extends PanelContainer
+
+## Emitted after a scan finished — lets the unified browser refresh its
+## results so new assets show up without a manual search.
+signal scanned
 ## The Assets2Godot dock: lists the Client's providers, their configured scan
 ## roots and index search. Directories are only ever scanned when the user
 ## adds them here — everything goes through the Client's /providers/*
@@ -214,7 +218,8 @@ func _on_scan() -> void:
 						c.set_text(0, "%s — %d indexed" % [r.get("path", ""), int(r.get("indexed", 0))])
 			pending[0] -= 1
 			if pending[0] == 0:
-				_scan.disabled = not (plugin.connection and plugin.connection.is_client_connected()))
+				_scan.disabled = not (plugin.connection and plugin.connection.is_client_connected())
+				scanned.emit())
 
 
 func _on_add() -> void:

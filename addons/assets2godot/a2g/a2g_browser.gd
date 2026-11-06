@@ -95,6 +95,12 @@ func _update_state() -> void:
 	_search.editable = connected
 
 
+## Public refresh entry — the dock emits `scanned` into this after a scan
+## finishes so the browser shows the new index without a manual search.
+func refresh() -> void:
+	_reload()
+
+
 func _reload() -> void:
 	_update_state()
 	if not (plugin.connection and plugin.connection.is_client_connected()):
