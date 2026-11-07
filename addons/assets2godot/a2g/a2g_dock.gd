@@ -4,6 +4,9 @@ extends PanelContainer
 ## Emitted after a scan finished — lets the unified browser refresh its
 ## results so new assets show up without a manual search.
 signal scanned
+## Which content the browser pane should show — "downloads" when the
+## "Downloaded to project" row is selected, "browser" for anything else.
+signal view_mode_selected(mode: StringName)
 ## The Assets2Godot dock: lists the Client's providers, their configured scan
 ## roots and index search. Directories are only ever scanned when the user
 ## adds them here — everything goes through the Client's /providers/*
@@ -85,7 +88,7 @@ func _ready() -> void:
 	# the secondary panel background that separates it from the base.
 	_tree.theme_type_variation = "TreeSecondary"
 	_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_tree.item_selected.connect(_update_state)
+	_tree.item_selected.connect(_on_item_selected)
 	_tree.item_mouse_selected.connect(_on_tree_rmb)
 	_tree.empty_clicked.connect(_on_tree_empty_rmb)
 	vbox.add_child(_tree)
@@ -134,6 +137,17 @@ func _update_state() -> void:
 	_remove.icon = _icon("Add" if adopt else "Remove")
 	_remove.tooltip_text = ("Adopt the detected folder as a scan root."
 		if adopt else "Remove the selected scan root from its provider.")
+
+
+## Selection also drives the browser pane: the "Downloaded to project" row
+## shows the gallery's downloads surface, everything else the index.
+func _on_item_selected() -> void:
+	_update_state()
+	var item := _tree.get_selected()
+	var mode := &"browser"
+	if item != null and item.has_meta("a2g_view") and item.get_meta("a2g_view") == "downloads":
+		mode = &"downloads"
+	view_mode_selected.emit(mode)
 
 
 ## The selected tree row's {"provider","root"} metadata, or null when the
@@ -191,6 +205,22 @@ func _on_refresh() -> void:
 			item.set_meta("provider_row", true)
 			item.set_meta("provider_row_name", str(p.get("name", "")))
 			_provider_items[p.get("name", "")] = item
+		# BlendKit's downloaded assets are a project source of their own —
+		# selecting it swaps the browser pane to the gallery's real
+		# downloaded-to-project surface.
+		var dl_parent: TreeItem = _provider_items.get("blenderkit")
+		if dl_parent == null:
+			dl_parent = root
+		var dl := _tree.create_item(dl_parent)
+		dl.set_text(0, "Downloaded to project")
+		var dl_icon := _icon("AssetStore")
+		if dl_icon == null:
+			dl_icon = _icon("AssetLib")
+		if dl_icon != null:
+			dl.set_icon(0, dl_icon)
+			dl.set_icon_max_width(0, _icon_size())
+		dl.set_tooltip_text(0, "Assets downloaded to %s" % plugin.download_dir)
+		dl.set_meta("a2g_view", "downloads")
 		# blenderkit is remote; its endpoints are the client's own /assets/*.
 		for pname in ["fab_vault", "local_dir"]:
 			if _provider_items.has(pname):
@@ -293,7 +323,8 @@ func _scan_provider(pname: String, pending: Array) -> void:
 # _tree_rmb_select: right-click selects the row, then a PopupMenu opens
 # at get_screen_position() + local position (the editor-source formula,
 # see docs/research/editor_ui_parity.md).
-enum DockMenu { ADOPT, REMOVE_ROOT, SHOW_FM, COPY_PATH, SCAN_PROVIDER, REFRESH, ADD_FOLDER }
+enum DockMenu { ADOPT, REMOVE_ROOT, SHOW_FM, COPY_PATH, SCAN_PROVIDER, REFRESH, ADD_FOLDER,
+		DL_SHOW_FS, DL_SHOW_FM, DL_OPEN_BK }
 
 
 func _on_tree_rmb(pos: Vector2, button: int) -> void:
@@ -311,6 +342,11 @@ func _on_tree_rmb(pos: Vector2, button: int) -> void:
 		menu.add_icon_item(_icon("ActionCopy"), "Copy Path", DockMenu.COPY_PATH)
 		menu.add_separator()
 		menu.add_icon_item(_icon("Play"), "Scan " + str(sel["provider"]), DockMenu.SCAN_PROVIDER)
+	elif _tree.get_selected() != null and _tree.get_selected().has_meta("a2g_view") \
+			and _tree.get_selected().get_meta("a2g_view") == "downloads":
+		menu.add_icon_item(_icon("ShowInFileSystem"), "Show in FileSystem", DockMenu.DL_SHOW_FS)
+		menu.add_icon_item(_icon("Folder"), "Show in File Manager", DockMenu.DL_SHOW_FM)
+		menu.add_icon_item(_icon("AssetStore"), "Open in BlendKit tab", DockMenu.DL_OPEN_BK)
 	elif _tree.get_selected() != null and _tree.get_selected().has_meta("provider_row") \
 			and _tree.get_selected().get_meta("provider_row") == true:
 		var pname: String = _tree.get_selected().get_meta("provider_row_name", "")
@@ -365,6 +401,15 @@ func _on_dock_menu(id: int) -> void:
 			_on_refresh()
 		DockMenu.ADD_FOLDER:
 			_on_add()
+		DockMenu.DL_SHOW_FS:
+			EditorInterface.get_file_system_dock().navigate_to_path(plugin.download_dir)
+		DockMenu.DL_SHOW_FM:
+			OS.shell_show_in_file_manager(plugin.absolute_download_path)
+		DockMenu.DL_OPEN_BK:
+			var g: Control = plugin.gallery
+			if g != null:
+				plugin.main_tabs.current_tab = g.get_index()
+				g.project_toggle.button_pressed = true
 
 
 func _on_add() -> void:

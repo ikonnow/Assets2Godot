@@ -40,6 +40,7 @@ const A2GDock = preload("res://addons/assets2godot/a2g/a2g_dock.gd")
 const A2GBrowser = preload("res://addons/assets2godot/a2g/a2g_browser.gd")
 const A2GSceneAssets = preload("res://addons/assets2godot/a2g/a2g_scene_assets.gd")
 const A2GContextPlugin = preload("res://addons/assets2godot/a2g/a2g_context_plugin.gd")
+const A2GPolyhaven = preload("res://addons/assets2godot/a2g/a2g_polyhaven.gd")
 const Auth = preload("res://addons/assets2godot/auth.gd")
 const BlenderImport = preload("res://addons/assets2godot/blender_import.gd")
 const ClientBinary = preload("res://addons/assets2godot/client_binary.gd")
@@ -208,13 +209,22 @@ func init_gallery() -> void:
 	scene_assets.plugin = self
 	scene_assets.name = "Assets"
 	main_tabs.add_child(scene_assets)
-	# The tab is a VBox: a dock-wide toolbar row over the Sources|Browser
-	# split — the FileSystem dock's toolbar sits above its split the same
-	# way, which is also why the native panels can shrink to ~0.
-	var tab := VBoxContainer.new()
+	# The tab page is a MarginContainer framing a VBox: a dock-wide toolbar
+	# row over the Sources|Browser split — the FileSystem dock's toolbar
+	# sits above its split the same way, which is also why the native
+	# panels can shrink to ~0. The L/R margin is the outer frame every
+	# dock gets from its panel + slot padding — without it the secondary
+	# fields touch the window edge.
+	var tab := MarginContainer.new()
 	tab.name = "Assets2Godot"
+	# Left keeps the dock-panel margin; the right field reaches the main
+	# screen's edge flush — the same edge the native FileSystem dock's
+	# list reaches against the right dock column.
+	tab.add_theme_constant_override("margin_left", int(4 * EditorInterface.get_editor_scale()))
+	var tabv := VBoxContainer.new()
+	tab.add_child(tabv)
 	var tbar := HBoxContainer.new()
-	tab.add_child(tbar)
+	tabv.add_child(tbar)
 	var a2g := HSplitContainer.new()
 	a2g.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	# The theme's own split separation (~3px — same gap the FileSystem
@@ -239,7 +249,10 @@ func init_gallery() -> void:
 	# A finished scan reindexes — refresh the browser so results appear
 	# without a manual search.
 	local.scanned.connect(browser.refresh)
-	tab.add_child(a2g)
+	# The Sources selection picks the right pane: index browser or the
+	# downloaded-to-project surface (the "Downloaded to project" row).
+	local.view_mode_selected.connect(browser.show_view_mode)
+	tabv.add_child(a2g)
 	main_tabs.add_child(tab)
 	# A2G entries inside Godot's own context menus — FileSystem dock
 	# ("Scan folder as root") and Scene tree ("Show scene resources").
@@ -254,6 +267,13 @@ func init_gallery() -> void:
 	gallery.name = "BlendKit"
 	gallery.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	main_tabs.add_child(gallery)
+	# Polyhaven: same kind of main tab as BlendKit, but pure GDScript —
+	# the public CC0 API needs neither login nor the Client.
+	var polyhaven := A2GPolyhaven.new()
+	polyhaven.plugin = self
+	polyhaven.name = "Polyhaven"
+	polyhaven.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	main_tabs.add_child(polyhaven)
 	main_tabs.hide()
 	EditorInterface.get_editor_main_screen().add_child(main_tabs)
 
