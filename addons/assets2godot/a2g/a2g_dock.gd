@@ -1,6 +1,8 @@
 @tool
 extends PanelContainer
 
+const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
+
 ## Emitted after a scan finished — lets the unified browser refresh its
 ## results so new assets show up without a manual search.
 signal scanned
@@ -122,6 +124,9 @@ func _on_connected() -> void:
 func _on_stopped() -> void:
 	_update_state()
 	_tree.clear()
+	# The local sections are client-independent — rebuild them so the
+	# tree never shows empty.
+	_fill_local_sections()
 
 
 func _update_state() -> void:
@@ -145,8 +150,10 @@ func _on_item_selected() -> void:
 	_update_state()
 	var item := _tree.get_selected()
 	var mode := &"browser"
-	if item != null and item.has_meta("a2g_view") and item.get_meta("a2g_view") == "downloads":
-		mode = &"downloads"
+	if item != null and item.has_meta("a2g_view"):
+		var v := str(item.get_meta("a2g_view"))
+		if not v.is_empty():
+			mode = StringName(v)
 	view_mode_selected.emit(mode)
 
 
@@ -191,6 +198,9 @@ func _on_refresh() -> void:
 	_refresh.disabled = true
 	_tree.clear()
 	var root := _tree.create_item()
+	# Local sections lead the tree — the folded-in "Assets" surface and
+	# the user collections; they exist with or without the Client.
+	_fill_local_sections()
 	_fetch("providers/list", func(list):
 		if list == null:
 			_status.text = "Client: providers/list failed"
@@ -229,6 +239,52 @@ func _on_refresh() -> void:
 		_update_state())
 
 
+## The client-independent top section: project files and the open
+## scene's resources — what used to be the "Assets" main tab, now rows
+## whose a2g_view meta swaps the browser pane via view_mode_selected.
+func _fill_local_sections() -> void:
+	var root := _tree.get_root()
+	if root == null:
+		root = _tree.create_item()
+	var proj := _tree.create_item(root)
+	proj.set_text(0, "Project")
+	proj.set_icon(0, _icon("Folder"))
+	proj.set_icon_max_width(0, _icon_size())
+	var files := _tree.create_item(proj)
+	files.set_text(0, "Files")
+	files.set_icon(0, _icon("File"))
+	files.set_icon_max_width(0, _icon_size())
+	files.set_tooltip_text(0, "All files under res:// — the project's own assets")
+	files.set_meta("a2g_view", "project")
+	var scene := _tree.create_item(proj)
+	scene.set_text(0, "Open scene")
+	scene.set_icon(0, _icon("PackedScene"))
+	scene.set_icon_max_width(0, _icon_size())
+	scene.set_tooltip_text(0, "Resources referenced by the currently edited scene")
+	scene.set_meta("a2g_view", "scene")
+
+
+## Selects the tree row whose a2g_view meta is [param view] — the entry
+## point for plugin.open_a2g(section). Selection fires item_selected,
+## which propagates the view-mode swap to the browser like a user click.
+func select_section(view: String) -> void:
+	var item := _find_view_item(_tree.get_root(), view)
+	if item != null:
+		item.select(0)
+		_tree.scroll_to_item(item)
+
+
+func _find_view_item(item: TreeItem, view: String) -> TreeItem:
+	while item != null:
+		if item.has_meta("a2g_view") and item.get_meta("a2g_view") == view:
+			return item
+		var found := _find_view_item(item.get_first_child(), view)
+		if found != null:
+			return found
+		item = item.get_next()
+	return null
+
+
 func _fill_status(item: TreeItem, pname: String, st) -> void:
 	if item == null or not (st is Dictionary):
 		return
@@ -238,12 +294,13 @@ func _fill_status(item: TreeItem, pname: String, st) -> void:
 	src.set_icon_max_width(0, _icon_size())
 	for r in st.get("roots", []):
 		var child := _tree.create_item(item)
-		child.set_text(0, str(r.get("path", "")))
+		var rp := str(r.get("path", ""))
+		child.set_text(0, A2GUI.short_path(rp))
 		child.set_icon(0, _icon("StatusSuccess" if r.get("exists", false) else "StatusError"))
 		child.set_icon_max_width(0, _icon_size())
-		child.set_tooltip_text(0, "reachable" if r.get("exists", false) else "not found")
+		child.set_tooltip_text(0, "%s\n%s" % [rp, "reachable" if r.get("exists", false) else "not found"])
 		child.set_meta("provider", pname)
-		child.set_meta("root", str(r.get("path", "")))
+		child.set_meta("root", rp)
 	# fab_vault: show detected candidates that are not configured yet.
 	for r in st.get("candidate_roots", []):
 		var in_roots := false
@@ -252,12 +309,13 @@ func _fill_status(item: TreeItem, pname: String, st) -> void:
 				in_roots = true
 		if r.get("exists", false) and not in_roots:
 			var child := _tree.create_item(item)
-			child.set_text(0, str(r.get("path", "")))
+			var rp := str(r.get("path", ""))
+			child.set_text(0, A2GUI.short_path(rp))
 			child.set_icon(0, _icon("StatusWarning"))
 			child.set_icon_max_width(0, _icon_size())
-			child.set_tooltip_text(0, "detected, not configured — select and Adopt to scan it")
+			child.set_tooltip_text(0, "%s\ndetected, not configured — select and Adopt to scan it" % rp)
 			child.set_meta("provider", pname)
-			child.set_meta("root", str(r.get("path", "")))
+			child.set_meta("root", rp)
 			child.set_meta("candidate", true)
 	if st.get("index_available") == false:
 		var child := _tree.create_item(item)
@@ -306,13 +364,15 @@ func _scan_provider(pname: String, pending: Array) -> void:
 				item.set_icon_max_width(0, _icon_size())
 				for r in sum.get("roots", []):
 					var c := _tree.create_item(item)
+					var rp := str(r.get("path", ""))
 					if r.get("skipped", false):
-						c.set_text(0, str(r.get("path", "")))
+						c.set_text(0, A2GUI.short_path(rp))
 						c.set_icon(0, _icon("StatusError"))
 					else:
-						c.set_text(0, "%s — %d indexed" % [r.get("path", ""), int(r.get("indexed", 0))])
+						c.set_text(0, "%s — %d indexed" % [A2GUI.short_path(rp), int(r.get("indexed", 0))])
 						c.set_icon(0, _icon("Folder"))
 					c.set_icon_max_width(0, _icon_size())
+					c.set_tooltip_text(0, rp)
 		pending[0] -= 1
 		if pending[0] == 0:
 			_scan.disabled = not (plugin.connection and plugin.connection.is_client_connected())
@@ -408,7 +468,7 @@ func _on_dock_menu(id: int) -> void:
 		DockMenu.DL_OPEN_BK:
 			var g: Control = plugin.gallery
 			if g != null:
-				plugin.main_tabs.current_tab = g.get_index()
+				plugin.select_provider(g)
 				g.project_toggle.button_pressed = true
 
 

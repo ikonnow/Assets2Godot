@@ -59,16 +59,32 @@ const VISUAL_KINDS := ["model", "ue_asset", "material", "texture", "hdr",
 
 ## Middle-elides long paths for tooltips: keeps head and tail so the file
 ## name stays readable ("res://…/a2g/scene.gd").
+## A path for display, the way the editor shows them: separators
+## normalized, the user home abbreviated to ~, then middle-ellipsized at
+## max_len so both ends survive. The full path always stays one hover
+## away — callers put it in the tooltip.
 static func short_path(path: String, max_len := 56) -> String:
-	if path.length() <= max_len:
-		return path
+	var p := path.replace("\\", "/")
+	var home := OS.get_environment("USERPROFILE") if OS.has_feature("windows") else OS.get_environment("HOME")
+	if not home.is_empty():
+		home = home.replace("\\", "/").trim_suffix("/")
+		if p == home:
+			return "~"
+		if p.begins_with(home + "/"):
+			p = "~" + p.substr(home.length())
+	if p.length() <= max_len:
+		return p
 	var keep := (max_len - 3) / 2
-	return path.left(keep) + "…" + path.right(keep)
+	return p.left(keep) + "…" + p.right(keep)
 
 
 const GALLERY_ITEM := preload("res://addons/assets2godot/ui/gallery/gallery_item.tscn")
 const GalleryItemScript = preload("res://addons/assets2godot/ui/gallery/gallery_item.gd")
 const BlenderImport = preload("res://addons/assets2godot/blender_import.gd")
+const GalleryApi = preload("res://addons/assets2godot/ui/gallery/gallery_api.gd")
+const ProjectAssets = preload("res://addons/assets2godot/ui/gallery/project_assets.gd")
+const Plans = preload("res://addons/assets2godot/ui/plans.gd")
+const A2GQuickDownload = preload("res://addons/assets2godot/a2g/a2g_quick_download.gd")
 
 ## Staged external assets land here — one folder per asset, like the
 ## architecture spec's res://imported_assets/<asset_name>/.
@@ -95,7 +111,7 @@ static func asset_card(title: String, kind: String, source: String, path: String
 ## upstream uses internally (navigate_to_path, edit_resource,
 ## open_scene_from_path, edit_node, reimport_files, clipboard_set,
 ## shell_show_in_file_manager).
-enum AssetMenu { SHOW_FS, OPEN, EDIT_RES, SELECT_NODE, COPY_NODE_PATH, REIMPORT, SHOW_FM, COPY_PATH, STAGE, PH_DOWNLOAD, PH_WEB, PH_COPY, PH_FM }
+enum AssetMenu { SHOW_FS, OPEN, EDIT_RES, SELECT_NODE, COPY_NODE_PATH, REIMPORT, SHOW_FM, COPY_PATH, STAGE, DETAILS }
 
 
 static func _on_card_gui_input(item: Control, ev: InputEvent) -> void:
@@ -111,21 +127,14 @@ static func _on_card_gui_input(item: Control, ev: InputEvent) -> void:
 static func asset_context_menu(entry: Dictionary, card: Control) -> void:
 	var menu := PopupMenu.new()
 	card.add_child(menu)
-	# Polyhaven cards carry no local path — their menu is remote:
-	# download the asset, open its page, or reveal a finished download.
-	var ph_slug := str(entry.get("ph_slug", ""))
-	if ph_slug != "":
-		if entry.get("ph_download") is Callable:
-			menu.add_icon_item(_menu_icon("AssetLib"), "Download", AssetMenu.PH_DOWNLOAD)
-		var ph_dir := entry.get("ph_dir")
-		if ph_dir is Callable and str(ph_dir.call()) != "":
-			menu.add_icon_item(_menu_icon("Folder"), "Show in File Manager", AssetMenu.PH_FM)
-		menu.add_icon_item(_menu_icon("ExternalLink"), "Open on polyhaven.com", AssetMenu.PH_WEB)
-		menu.add_icon_item(_menu_icon("ActionCopy"), "Copy page URL", AssetMenu.PH_COPY)
-		menu.id_pressed.connect(func(id): _on_asset_menu(id, entry))
-		menu.popup_hide.connect(menu.queue_free)
-		menu.position = card.get_screen_position() + card.get_local_mouse_position()
-		menu.popup()
+	# Remote-provider cards carry no local path — right-click opens the
+	# compact quick-download tile under the cursor (format picker +
+	# Download + secondary actions), the same surface BlendKit cards get
+	# via install_bk_quick_download. Everything it needs rides in the
+	# remote_* payload keys.
+	var remote_slug := str(entry.get("remote_slug", ""))
+	if remote_slug != "":
+		quick_download(card, entry)
 		return
 	var path := str(entry.get("path", ""))
 	var is_res_file := path.begins_with("res://")
@@ -134,6 +143,12 @@ static func asset_context_menu(entry: Dictionary, card: Control) -> void:
 	var node: Node = entry.get("node")
 	var has_res := res != null and is_instance_valid(res)
 	var has_node := node != null and is_instance_valid(node)
+
+	# Left-click already pops details; the menu offers it too so the
+	# verb survives on touch and on cards whose payload lacks a click.
+	var details_cb: Variant = entry.get("details")
+	if details_cb is Callable and details_cb.is_valid():
+		menu.add_icon_item(_menu_icon("ZoomCheck"), "Details…", AssetMenu.DETAILS)
 
 	if is_res_file:
 		# Upstream filesystem_dock order: Open first, then the file ops.
@@ -213,20 +228,121 @@ static func _on_asset_menu(id: int, entry: Dictionary) -> void:
 			DisplayServer.clipboard_set(path)
 		AssetMenu.STAGE:
 			stage_into_project(entry)
-		AssetMenu.PH_DOWNLOAD:
-			var cb: Variant = entry.get("ph_download")
-			if cb is Callable and cb.is_valid():
-				cb.call()
-		AssetMenu.PH_FM:
-			var dir_cb: Variant = entry.get("ph_dir")
-			if dir_cb is Callable and dir_cb.is_valid():
-				var dir := str(dir_cb.call())
-				if dir != "":
-					OS.shell_show_in_file_manager(dir)
-		AssetMenu.PH_WEB:
-			OS.shell_open(str(entry.get("ph_url", "")))
-		AssetMenu.PH_COPY:
-			DisplayServer.clipboard_set(str(entry.get("ph_url", "")))
+		AssetMenu.DETAILS:
+			var cb2: Variant = entry.get("details")
+			if cb2 is Callable and cb2.is_valid():
+				cb2.call()
+
+
+## MARK: quick-download tile — the compact remote surface under the
+## cursor (format picker + Download + secondary actions), shared by
+## remote-provider cards and the BlendKit gallery.
+
+
+## Opens the tile for the remote_* [param entry]; one shared PopupPanel
+## per card, so repeated right-clicks reuse it.
+static func quick_download(card: Control, entry: Dictionary) -> void:
+	var tile: PopupPanel = card.get_node_or_null(^"A2GQuickDownload")
+	if tile == null:
+		tile = A2GQuickDownload.new()
+		tile.name = "A2GQuickDownload"
+		card.add_child(tile)
+	tile.open_for(card, entry)
+
+
+## The same tile on upstream BlendKit gallery cards, installed once from
+## plugin.gd — zero upstream edits: SceneTree.node_added spots
+## GalleryItems and connects a right-click handler that builds the
+## remote_* entry from the card's own asset dict. Self-disconnects when
+## the gallery leaves the tree (plugin disabled).
+static func install_bk_quick_download(tree: SceneTree, gallery: Control) -> void:
+	var hook: Callable
+	hook = func(node: Node):
+		if not is_instance_valid(gallery):
+			if tree.node_added.is_connected(hook):
+				tree.node_added.disconnect(hook)
+			return
+		if node.get_script() != GalleryItemScript or node.has_meta(&"a2g_bk_quick"):
+			return
+		node.set_meta(&"a2g_bk_quick", true)
+		node.gui_input.connect(func(ev): _on_bk_card_input(node, ev, gallery))
+	tree.node_added.connect(hook)
+
+
+static func _on_bk_card_input(item: Control, ev: InputEvent, gallery: Control) -> void:
+	var mb := ev as InputEventMouseButton
+	if not (mb and mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed):
+		return
+	var asset: Variant = item.get("asset")
+	if not asset is Dictionary or asset.is_empty() or asset.get("a2g", false):
+		return
+	item.accept_event()
+	quick_download(item, _bk_remote_entry(asset, gallery))
+
+
+## The BlendKit asset dict → the remote_* contract the tile consumes.
+## File options come from the asset's files; downloads go through the
+## gallery's own Downloads model so progress shows on the card as usual.
+static func _bk_remote_entry(asset: Dictionary, gallery: Control) -> Dictionary:
+	var plugin = gallery.get("plugin")
+	var opts := _bk_options(asset, plugin)
+	var default_ft := GalleryApi.pick_file_type(asset,
+		str(plugin.model_format), plugin.download_resolution())
+	var default_idx := -1
+	for i in opts.size():
+		if str(opts[i].get("key", "")) == default_ft:
+			default_idx = i
+	return {
+		"remote_slug": GalleryApi.base_id(asset),
+		"remote_title": str(asset.get("displayName", asset.get("name", ""))),
+		"remote_url": GalleryApi.web_url(plugin.SERVER, asset),
+		"remote_site": "blendkit.com",
+		"remote_options": func(cb): cb.call(opts, default_idx),
+		"remote_download": func(ft): _bk_download(asset, str(ft), gallery, plugin),
+		"remote_state": func(_ft): return _bk_state(asset, gallery, plugin),
+		"remote_dir": func() -> String:
+			return ProjectAssets.asset_folder(plugin.absolute_download_path, asset) \
+				if gallery.is_downloaded(asset) else "",
+		"remote_details": func(): gallery.open_details(asset),
+	}
+
+
+static func _bk_options(asset: Dictionary, plugin) -> Array:
+	var opts := []
+	for ft in GalleryApi.downloadable_file_types(asset):
+		opts.append({"key": ft, "label": GalleryApi.file_type_label(ft), "data": ft})
+	return opts
+
+
+## Tile button state for the BlendKit card: an active download on this
+## asset disables it (downloads.start would no-op anyway); a plan-gated
+## asset offers the pricing link like asset_details does.
+static func _bk_state(asset: Dictionary, gallery: Control, plugin) -> Dictionary:
+	var dl: Dictionary = gallery.downloads.get_download(GalleryApi.base_id(asset))
+	if dl.get("status", "") in GalleryApi.ACTIVE_DOWNLOAD:
+		return {"label": "Downloading…", "enabled": false,
+			"note": str(dl.get("message", ""))}
+	if asset.get("canDownload") == true:
+		return {}
+	var auth = plugin.auth
+	if asset.get("isFree") != true \
+			and (not auth.is_logged_in() or Plans.user_plan(auth.profile) == "free"):
+		return {"label": "Get Full Plan…", "enabled": true, "note": ""}
+	var reason := GalleryApi.cant_download_message(asset)
+	return {"label": "Download", "enabled": false,
+		"note": reason if not reason.is_empty() else "This asset can't be downloaded."}
+
+
+static func _bk_download(asset: Dictionary, ft: String, gallery: Control, plugin) -> void:
+	if ft.is_empty():
+		return
+	if asset.get("canDownload") != true:
+		var auth = plugin.auth
+		if asset.get("isFree") != true \
+				and (not auth.is_logged_in() or Plans.user_plan(auth.profile) == "free"):
+			OS.shell_open(plugin.SERVER + "/plans/pricing/")
+		return
+	gallery.downloads.start(asset, ft)
 
 
 ## Copies an external file into res://imported_assets/<name>/ and lets
@@ -235,30 +351,13 @@ static func _on_asset_menu(id: int, entry: Dictionary) -> void:
 ## settings the BlendKit downloads use, not a parallel setup). Returns the
 ## staged res:// path, "" when nothing was copied.
 static func stage_into_project(entry: Dictionary) -> String:
-	var src := str(entry.get("path", ""))
-	# Indexed paths may carry OS separators; get_file() only splits "/".
-	src = src.replace("\\", "/")
-	if src == "" or src.begins_with("res://") or not FileAccess.file_exists(src):
+	var res := stage_files([entry])
+	for f in res["failed"]:
+		push_warning("A2G: %s" % str(f["error"]))
+	if res["staged"].is_empty():
 		return ""
-	var dir_res := STAGING_DIR.path_join(src.get_file().get_basename().validate_filename())
-	var mk := DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir_res))
-	if mk != OK:
-		push_warning("A2G: couldn't create %s (%s)" % [dir_res, error_string(mk)])
-		return ""
-	var dst := dir_res.path_join(src.get_file())
-	var err := DirAccess.copy_absolute(src, ProjectSettings.globalize_path(dst))
-	if err != OK:
-		push_warning("A2G: couldn't stage %s (%s)" % [src, error_string(err)])
-		return ""
-	# A same-basename preview image travels with the asset — the sibling
-	# match that powers browser thumbnails also keeps the staged copy's
-	# preview instead of becoming an orphan in the project.
-	for ext in PREVIEW_IMAGE_EXTS:
-		var sib: String = src.get_basename() + "." + ext
-		if FileAccess.file_exists(sib):
-			DirAccess.copy_absolute(sib, ProjectSettings.globalize_path(
-				dir_res.path_join(sib.get_file())))
-			break
+	var dst: String = res["staged"][0]["dst"]
+	var src: String = res["staged"][0]["src"]
 	if src.get_extension().to_lower() == "blend" and not _blend_ready():
 		# The Blender Import setting governs whether Godot imports .blend
 		# at all; with it off the staged file stays hidden — exactly like
@@ -267,6 +366,44 @@ static func stage_into_project(entry: Dictionary) -> String:
 	EditorInterface.get_resource_filesystem().scan()
 	EditorInterface.get_file_system_dock().navigate_to_path(dst)
 	return dst
+
+
+## Batch copy into res://imported_assets/<name>/ — the same staging the
+## single-file path uses, minus scan/navigation so callers can write
+## .import params between copy and scan (the import dialog) or report
+## per-file results (batch import). Returns
+## {"staged": [{src, dst}], "failed": [{entry, error}]}.
+static func stage_files(entries: Array) -> Dictionary:
+	var staged := []
+	var failed := []
+	for e in entries:
+		var src := str(e.get("path", ""))
+		# Indexed paths may carry OS separators; get_file() only splits "/".
+		src = src.replace("\\", "/")
+		if src == "" or src.begins_with("res://") or not FileAccess.file_exists(src):
+			failed.append({"entry": e, "error": "not an external file: %s" % src})
+			continue
+		var dir_res := STAGING_DIR.path_join(src.get_file().get_basename().validate_filename())
+		var mk := DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir_res))
+		if mk != OK:
+			failed.append({"entry": e, "error": "couldn't create %s (%s)" % [dir_res, error_string(mk)]})
+			continue
+		var dst := dir_res.path_join(src.get_file())
+		var err := DirAccess.copy_absolute(src, ProjectSettings.globalize_path(dst))
+		if err != OK:
+			failed.append({"entry": e, "error": "couldn't copy %s (%s)" % [src, error_string(err)]})
+			continue
+		# A same-basename preview image travels with the asset — the
+		# sibling match that powers browser thumbnails also keeps the
+		# staged copy's preview instead of orphaning in the project.
+		for ext in PREVIEW_IMAGE_EXTS:
+			var sib: String = src.get_basename() + "." + ext
+			if FileAccess.file_exists(sib):
+				DirAccess.copy_absolute(sib, ProjectSettings.globalize_path(
+					dir_res.path_join(sib.get_file())))
+				break
+		staged.append({"entry": e, "src": src, "dst": dst})
+	return {"staged": staged, "failed": failed}
 
 
 ## Godot can import .blend when the Blender Import settings say so:
@@ -356,6 +493,31 @@ static func make_scroll() -> ScrollContainer:
 			EditorInterface.get_base_control().get_theme_stylebox("panel", "Tree"))
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
 	return scroll
+
+
+## Standalone TabBar styled like a TabContainer's strip: the editor theme
+## carries these items on the "TabContainer" theme type, the TabBar reads
+## the same names under "TabBar" — copy them over so the main-screen tab
+## row renders like the dock tabs it replaced.
+static func style_tabbar(bar: TabBar) -> void:
+	var base := EditorInterface.get_base_control()
+	for name in ["tab_selected", "tab_unselected", "tab_hovered", "tab_disabled",
+			"tab_focus", "tab_highlight"]:
+		var sb := base.get_theme_stylebox(name, "TabContainer")
+		if sb != null:
+			bar.add_theme_stylebox_override(name, sb)
+	for name in ["font_selected_color", "font_unselected_color",
+			"font_hovered_color", "font_disabled_color", "font_outline_color"]:
+		var col := base.get_theme_color(name, "TabContainer")
+		bar.add_theme_color_override(name, col)
+	for name in ["h_separation", "icon_max_width", "outline_size"]:
+		bar.add_theme_constant_override(name,
+			base.get_theme_constant(name, "TabContainer"))
+	var font := base.get_theme_font("font", "TabContainer")
+	if font != null:
+		bar.add_theme_font_override("font", font)
+	bar.add_theme_font_size_override("font_size",
+		base.get_theme_font_size("font_size", "TabContainer"))
 
 
 ## A GridContainer configured like the gallery's grid (gap = GAP * scale,

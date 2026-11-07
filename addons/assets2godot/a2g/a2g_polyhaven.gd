@@ -8,6 +8,8 @@ extends PanelContainer
 const Icons = preload("res://addons/assets2godot/ui/icons.gd")
 const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
 const PhApi = preload("res://addons/assets2godot/a2g/polyhaven_api.gd")
+const PhMenuButton = preload("res://addons/assets2godot/a2g/a2g_ph_menu_button.gd")
+const PhDetails = preload("res://addons/assets2godot/a2g/a2g_ph_details.gd")
 
 ## Editor setting holding the absolute download target dir. "" = auto:
 ## a local_dir root named like *polyhaven*, else <download_dir>/polyhaven.
@@ -19,21 +21,28 @@ const THUMB_PARALLEL := 4
 
 var plugin: EditorPlugin
 
+## 0 connecting / 1 online / 2 unreachable — set from the catalog fetch
+## results; drives the menu's "Catalog:" row, its status dot and the
+## offline empty-state.
+var catalog_state := 0
+signal catalog_state_changed(state: int)
+
 var _search: LineEdit
 var _type: OptionButton
 var _sort_btn: OptionButton
 var _cat_btn: OptionButton
-var _refresh_btn: Button
-var _target_btn: Button
+var _dl_toggle: Button
+var _dl_badge: Label
+var _dl_only := false
+var _menu_btn: Button
 var _status: Label
 var _scroll: ScrollContainer
 var _border: PanelContainer
 var _grid: GridContainer
 var _empty: Label
-var _dlg: ConfirmationDialog
-var _dlg_options: OptionButton
-var _dlg_label: Label
+var _retry: Button
 var _file_dlg: EditorFileDialog
+var _details
 
 var _assets: Array = []
 var _cache := {}
@@ -46,17 +55,18 @@ var _res_hint := "2k"
 var _local_roots := []
 var _roots_fetched := false
 var _dl_asset: Dictionary = {}
-var _dl_files: Array = []
 var _dl_queue: Array = []
 var _dl_dest := ""
 var _dl_req: HTTPRequest
 var _dl_done := {}
+var _updating_theme := false
 
 
 func _ready() -> void:
-	add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	var edscale := EditorInterface.get_editor_scale()
 	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 6)
+	# Same row separation as BlendKit's Main VBox (10 * edscale there).
+	vbox.add_theme_constant_override("separation", int(10 * edscale))
 	add_child(vbox)
 
 	var tbar := HBoxContainer.new()
@@ -67,22 +77,38 @@ func _ready() -> void:
 	_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_search.text_submitted.connect(func(_q): _rebuild())
 	tbar.add_child(_search)
-	# SearchRow ends like BlendKit's: VSeparator + icon buttons, no text.
+	# SearchRow verbatim from BlendKit: SearchEdit | DownloadToggle |
+	# VSeparator | MenuButton — one flat icon toggle in the ProjectToggle
+	# slot (the AssetStore/AssetLib "download arrow"), then the menu.
+	_dl_toggle = Button.new()
+	_dl_toggle.theme_type_variation = "FlatButton"
+	_dl_toggle.toggle_mode = true
+	_dl_toggle.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_dl_toggle.toggled.connect(func(pressed): _dl_only = pressed; _rebuild())
+	tbar.add_child(_dl_toggle)
+	# The download badge on the toggle's top-right corner — same
+	# construction as gallery.gd's _download_badge on ProjectToggle.
+	_dl_badge = Label.new()
+	_dl_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_dl_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_dl_badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_dl_badge.custom_minimum_size = Vector2.ONE * roundf(16 * edscale)
+	_dl_toggle.add_child(_dl_badge)
+	_dl_badge.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	_dl_badge.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	# Hang over the corner, clear of the icon.
+	_dl_badge.offset_left = 5 * edscale
+	_dl_badge.offset_right = 5 * edscale
+	_dl_badge.offset_top = -4 * edscale
+	_dl_badge.offset_bottom = -4 * edscale
+	_update_dl_badge()
 	tbar.add_child(VSeparator.new())
-	_refresh_btn = Button.new()
-	_refresh_btn.icon = _editor_icon("Reload")
-	if _refresh_btn.icon == null:
-		_refresh_btn.text = "Refresh"
-	_refresh_btn.theme_type_variation = "FlatButton"
-	_refresh_btn.tooltip_text = "Reload the Polyhaven catalog."
-	_refresh_btn.pressed.connect(_reload)
-	tbar.add_child(_refresh_btn)
-	_target_btn = Button.new()
-	_target_btn.icon = _editor_icon("Folder")
-	_target_btn.theme_type_variation = "FlatButton"
-	_target_btn.tooltip_text = "Download target folder…"
-	_target_btn.pressed.connect(_pick_target)
-	tbar.add_child(_target_btn)
+	_menu_btn = PhMenuButton.new()
+	# In-tree before setup: its refresh() resolves theme icons, which only
+	# works once the button is inside the tree (BlendKit's button is a
+	# scene node, so it has this for free).
+	tbar.add_child(_menu_btn)
+	_menu_btn.setup(plugin, self)
 
 	# FilterRow mirroring BlendKit: an HFlowContainer of Label+Option HBox
 	# groups (Sort/Type/Category — plus Resolution, Polyhaven's honest
@@ -130,17 +156,26 @@ func _ready() -> void:
 	_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_empty.visible = false
 	vbox.add_child(_empty)
+	# BlendKit's MessageBox + Retry pattern for the offline state.
+	_retry = Button.new()
+	_retry.text = "Retry"
+	_retry.theme_type_variation = "PanelBackgroundButton"
+	_retry.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_retry.visible = false
+	_retry.pressed.connect(reload_catalog)
+	vbox.add_child(_retry)
 
-	_dlg = ConfirmationDialog.new()
-	var dvb := VBoxContainer.new()
-	_dlg_label = Label.new()
-	dvb.add_child(_dlg_label)
-	_dlg_options = OptionButton.new()
-	_dlg_options.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	dvb.add_child(_dlg_options)
-	_dlg.add_child(dvb)
-	_dlg.confirmed.connect(_on_download_confirmed)
-	add_child(_dlg)
+	# The asset popup — a card click opens it like BlendKit's
+	# asset_details; the context menu keeps the quick download dialog.
+	_details = PhDetails.new()
+	add_child(_details)
+	_details.download_requested.connect(_start_download)
+	_details.tag_selected.connect(func(t):
+		_search.text = t
+		_rebuild())
+	_details.author_selected.connect(func(a):
+		_search.text = a
+		_rebuild())
 
 	_file_dlg = EditorFileDialog.new()
 	_file_dlg.file_mode = EditorFileDialog.FILE_MODE_OPEN_DIR
@@ -152,22 +187,97 @@ func _ready() -> void:
 		_status.text = "Download target: %s" % A2GUI.short_path(dir))
 	add_child(_file_dlg)
 
+	_update_theme()
 	if plugin.connection:
 		plugin.connection.connected.connect(_fetch_roots)
 	_reload()
 
 
+func _notification(what: int) -> void:
+	match what:
+		NOTIFICATION_VISIBILITY_CHANGED:
+			# VISIBILITY_CHANGED can arrive between ENTER_TREE and _ready —
+			# _search does not exist yet then.
+			if not plugin or not is_visible_in_tree() or _search == null:
+				return
+			# Like the Asset Store / BlendKit tab, typing goes straight to
+			# the search when the tab shows.
+			_search.grab_focus()
+			# …and the catalog refetches when it never arrived — the tab
+			# recovers on its own once the connection is back.
+			if _assets.is_empty():
+				_reload()
+		NOTIFICATION_THEME_CHANGED:
+			# Overriding own styles emits THEME_CHANGED again, hence the guard.
+			if is_node_ready() and plugin and not _updating_theme:
+				_updating_theme = true
+				_update_theme()
+				_updating_theme = false
+
+
+## Theme-derived bits, refreshed on NOTIFICATION_THEME_CHANGED — the panel
+## wears the AssetLib "bg" stylebox like BlendKit's gallery (its content
+## margin gives the search row the inset) and the field carries the same
+## Search right_icon.
+func _update_theme() -> void:
+	add_theme_stylebox_override("panel", get_theme_stylebox("bg", "AssetLib"))
+	if _search:
+		_search.right_icon = get_theme_icon("Search", "EditorIcons")
+	if _dl_toggle:
+		# AssetStore is the Godot 4.7+ name of AssetLib — gallery.gd:164.
+		_dl_toggle.icon = get_theme_icon("AssetStore" if has_theme_icon("AssetStore", "EditorIcons") else "AssetLib", "EditorIcons")
+		# Flat look, but the padding of a regular button like the menu button.
+		_dl_toggle.custom_minimum_size.x = _dl_toggle.icon.get_width() + get_theme_stylebox("normal", "Button").get_minimum_size().x
+		var edscale := EditorInterface.get_editor_scale()
+		var badge_style := StyleBoxFlat.new()
+		badge_style.bg_color = get_theme_color("accent_color", "Editor")
+		badge_style.set_corner_radius_all(int(8 * edscale))
+		# A ring in the background color keeps it apart from the pressed button.
+		badge_style.set_border_width_all(maxi(1, int(2 * edscale)))
+		badge_style.border_color = get_theme_color("base_color", "Editor")
+		badge_style.content_margin_left = 3 * edscale
+		badge_style.content_margin_right = 3 * edscale
+		_dl_badge.add_theme_stylebox_override("normal", badge_style)
+		_dl_badge.add_theme_color_override("font_color", get_theme_color("base_color", "Editor"))
+		_dl_badge.add_theme_font_override("font", get_theme_font("bold", "EditorFonts"))
+		_dl_badge.add_theme_font_size_override("font_size", int(10 * edscale))
+
+
 # MARK: catalog
 
-func _fetch_url(url: String, cb: Callable) -> void:
+## Refetch the whole catalog — the menu's "Reload catalog" and the
+## offline-state Retry both run through here.
+func reload_catalog() -> void:
+	_cache.clear()
+	_cats.clear()
+	_reload()
+
+
+func _set_catalog_state(s: int) -> void:
+	if s == catalog_state:
+		return
+	catalog_state = s
+	catalog_state_changed.emit(s)
+	if _menu_btn:
+		_menu_btn.refresh()
+
+
+## Shared fetch for catalog + files. track_state marks the request as a
+## catalog probe — only those feed the menu's status dot; a /files 404
+## must never flip the whole catalog red.
+func _fetch_url(url: String, cb: Callable, track_state := false) -> void:
 	var req := HTTPRequest.new()
 	req.timeout = 30.0
 	add_child(req)
-	req.request_completed.connect(func(_r, code, _h, body):
+	req.request_completed.connect(func(_result, code, _h, body):
 		req.queue_free()
+		if track_state:
+			_set_catalog_state(1 if code == 200 else 2)
 		cb.call(body.get_string_from_utf8() if code == 200 else ""))
-	if req.request(url) != OK:
+	if req.request(url, [PhApi.UA_HEADER]) != OK:
 		req.queue_free()
+		if track_state:
+			_set_catalog_state(2)
 		plugin.log_warning("Polyhaven request failed to start: %s" % url)
 
 
@@ -181,11 +291,12 @@ func _reload() -> void:
 	_status.text = "Loading Polyhaven %s…" % ", ".join(missing)
 	var pending := [missing.size() * 2]
 	for t in missing:
-		_fetch_url(PhApi.assets_url(t), func(text):
+		var on_assets := func(text):
 			_cache[t] = PhApi.parse_assets(JSON.parse_string(text))
 			pending[0] -= 1
 			if pending[0] == 0:
-				_merge_and_rebuild())
+				_merge_and_rebuild()
+		_fetch_url(PhApi.assets_url(t), on_assets, true)
 		_fetch_url(PhApi.categories_url(t), func(text):
 			var d = JSON.parse_string(text)
 			_cats[t] = d if d is Dictionary else {}
@@ -234,34 +345,53 @@ func _refill_categories() -> void:
 
 func _rebuild() -> void:
 	for c in _grid.get_children():
+		_grid.remove_child(c)
 		c.queue_free()
-		_cards.clear()
-		_thumb_queue.clear()
+	_cards.clear()
+	_thumb_queue.clear()
 	var text := _search.text
 	var cat := str(_cat_btn.get_selected_metadata()) if _cat_btn.selected > 0 else ""
+	var downloaded := _downloaded_slugs() if _dl_only else {}
 	var shown := 0
 	var matched := 0
 	for a in _assets:
+		var slug := str(a.get("slug", ""))
 		if not PhApi.matches(a, text) or not PhApi.in_category(a, cat):
+			continue
+		if _dl_only and not downloaded.has(slug):
 			continue
 		matched += 1
 		if shown >= PAGE_MAX:
 			continue
 		shown += 1
-		var slug := str(a.get("slug", ""))
 		var card: Control = A2GUI.asset_card(str(a.get("name", "?")), str(a.get("type", "")),
 			"polyhaven", "", null, str(PhApi.TYPE_ICONS.get(a.get("type", ""), "File")),
-			{"ph": true, "ph_slug": slug, "ph_url": PhApi.web_url(slug),
-				"ph_download": Callable(self, "_on_card_download").bind(slug),
-				"ph_dir": Callable(self, "_downloaded_dir").bind(slug)})
-		card.connect("selected", func(_asset): _on_card_download(slug))
+			{"remote_slug": slug, "remote_title": str(a.get("name", slug)),
+				"remote_url": PhApi.web_url(slug),
+				"remote_site": "polyhaven.com",
+				"remote_options": Callable(self, "_remote_options_for").bind(slug),
+				"remote_download": Callable(self, "_remote_download").bind(slug),
+				"remote_state": Callable(self, "_remote_state").bind(slug),
+				"remote_dir": Callable(self, "_downloaded_dir").bind(slug),
+				"remote_details": Callable(self, "_show_details").bind(slug)})
+		card.connect("selected", func(_asset): _show_details(slug))
 		_grid.add_child(card)
 		_cards[slug] = card
 		_queue_thumb(a)
 	_empty.visible = matched == 0
+	if matched == 0:
+		if _dl_only:
+			_empty.text = "Nothing downloaded yet — cards get a Download option."
+		elif _assets.is_empty():
+			_empty.text = "Polyhaven unreachable — offline or polyhaven.com is down."
+		else:
+			_empty.text = "No Polyhaven assets match — check the search and filters."
+	# The Retry only matters while the catalog itself is missing.
+	_retry.visible = _assets.is_empty()
 	var total := _assets.size()
 	if total == 0:
-		_status.text = "Nothing loaded — offline or fetch failed."
+		_status.text = "Polyhaven unreachable — offline or fetch failed." if catalog_state == 2 \
+			else "Nothing loaded yet."
 	elif shown < matched:
 		_status.text = "Showing %d of %d matches (%d catalog)" % [shown, matched, total]
 	elif text.strip_edges() != "" or cat != "":
@@ -270,6 +400,30 @@ func _rebuild() -> void:
 		_status.text = "%d assets" % total
 	A2GUI.update_columns(_scroll, _grid, _border)
 	_fetch_roots()
+
+
+## Slugs of downloaded assets: this session's finished downloads plus any
+## asset folder already under the download target (<target>/<type>/<slug>) —
+## the toggle's "downloaded" view, mirroring BlendKit's project view.
+func _downloaded_slugs() -> Dictionary:
+	var slugs := {}
+	for slug in _dl_done:
+		slugs[slug] = true
+	var base := _target_dir()
+	if DirAccess.dir_exists_absolute(base):
+		for type_dir in DirAccess.get_directories_at(base):
+			for d in DirAccess.get_directories_at(base.path_join(type_dir)):
+				slugs[d] = true
+	return slugs
+
+
+func _update_dl_badge() -> void:
+	var count := _dl_queue.size()
+	_dl_badge.text = str(count)
+	_dl_badge.visible = count > 0
+	_dl_toggle.tooltip_text = "Show downloaded Polyhaven assets"
+	if count > 0:
+		_dl_toggle.tooltip_text += "\n%d %s in progress" % [count, "download" if count == 1 else "downloads"]
 
 
 func _asset_by_slug(slug: String) -> Dictionary:
@@ -313,7 +467,7 @@ func _pump_thumbs() -> void:
 				if err != OK:
 					err = img.load_png_from_buffer(body)
 				if err != OK:
-					img.load_jpg_from_buffer(body)
+					err = img.load_jpg_from_buffer(body)
 				if err == OK:
 					var tex := ImageTexture.create_from_image(img)
 					_thumb_cache[url] = tex
@@ -321,58 +475,106 @@ func _pump_thumbs() -> void:
 					if is_instance_valid(card):
 						card.call("set_thumb_texture", tex)
 			_pump_thumbs())
-		if req.request(url) != OK:
+		if req.request(url, [PhApi.UA_HEADER]) != OK:
 			req.queue_free()
 			_thumb_active -= 1
 			_pump_thumbs()
 
 
-# MARK: download
+# MARK: details popup
 
-func _on_card_download(slug: String) -> void:
-	if _dl_req != null:
-		_status.text = "A download is running — wait for it to finish."
-		return
+## Card click — the details popup like BlendKit's asset_details. Fetches
+## /files first so the picker's options are real, then shows.
+func _show_details(slug: String) -> void:
 	var asset := _asset_by_slug(slug)
 	if asset.is_empty():
 		return
 	_status.text = "Fetching files for %s…" % str(asset.get("name", slug))
 	_fetch_url(PhApi.files_url(slug), func(text):
 		var options := PhApi.flatten_files(JSON.parse_string(text))
-		if options.is_empty():
-			_status.text = "No downloadable files for %s" % str(asset.get("name", slug))
-			return
-		_dl_asset = asset
-		_dl_files = options
-		_dlg.title = "Download %s" % str(asset.get("name", slug))
-		_dlg_label.text = "%s  ·  %s  ·  → %s" % [str(asset.get("name", slug)),
-			str(asset.get("type", "")), A2GUI.short_path(_target_dir())]
-		_dlg_options.clear()
-		for i in options.size():
-			_dlg_options.add_item(str(options[i].get("label", "?")), i)
-			_dlg_options.set_item_metadata(i, options[i])
-		_dlg_options.select(PhApi.pick_default(options, _res_hint))
-		_dlg.popup_centered())
+		var thumb: Texture2D = _thumb_cache.get(str(asset.get("thumbnail_url", "")))
+		_details.state_getter = _dl_state_for.bind(slug)
+		_details.show_asset(asset, options, thumb, _res_hint)
+		_status.text = "")
 
 
-func _on_download_confirmed() -> void:
-	var i := _dlg_options.selected
-	if i < 0 or i >= _dl_files.size():
+## The state the popup's action button needs: downloaded folder when the
+## asset's dir exists under the target, downloading while its queue runs.
+func _dl_state_for(slug: String) -> Dictionary:
+	var dir := str(_dl_done.get(slug, ""))
+	if dir.is_empty():
+		var a := _asset_by_slug(slug)
+		var d := _target_dir().path_join(str(PhApi.TYPE_DIRS.get(a.get("type", ""), "misc"))) \
+			.path_join(slug)
+		if DirAccess.dir_exists_absolute(d):
+			dir = d
+	return {"dir": dir,
+		"downloading": _dl_req != null and str(_dl_asset.get("slug", "")) == slug}
+
+
+# MARK: quick-download tile callbacks (the card's remote_* payload)
+
+var _files_cache := {}
+
+
+## Options for the quick tile: /files fetched once per asset, flattened
+## to the picker's rows, answered with the resolution-preferred default.
+func _remote_options_for(slug: String, cb: Callable) -> void:
+	if _files_cache.has(slug):
+		var cached: Array = _files_cache[slug]
+		cb.call(cached, PhApi.pick_default(cached, _res_hint))
 		return
-	var option: Dictionary = _dl_files[i]
+	_fetch_url(PhApi.files_url(slug), func(text):
+		var options := PhApi.flatten_files(JSON.parse_string(text))
+		_files_cache[slug] = options
+		cb.call(options, PhApi.pick_default(options, _res_hint)))
+
+
+## The tile's Download action — the chosen option is a flatten_files
+## entry, queued through the same pipeline as the details popup's.
+func _remote_download(slug: String, data: Variant) -> void:
+	var asset := _asset_by_slug(slug)
+	if asset.is_empty() or not data is Dictionary:
+		return
+	_start_download(asset, data)
+
+
+## Tile button state: our queue is single-flight, so a running download
+## disables it — "Downloading…" on this asset, a note on the others.
+func _remote_state(slug: String, _data: Variant) -> Dictionary:
+	if _dl_req == null:
+		return {}
+	var this := str(_dl_asset.get("slug", "")) == slug
+	return {"enabled": false,
+		"label": "Downloading…" if this else "Download",
+		"note": "" if this else "A download is running — wait for it to finish."}
+
+
+# MARK: download
+
+## Shared start for the quick tile's remote_download and the popup's
+## download_requested — the same queue either way.
+func _start_download(asset: Dictionary, option: Dictionary) -> void:
+	if _dl_req != null:
+		_status.text = "A download is running — wait for it to finish."
+		return
 	var dir := _target_dir()
 	if dir.is_empty():
 		_status.text = "No download target — pick a folder via the toolbar button."
 		return
-	_dl_dest = dir.path_join(str(PhApi.TYPE_DIRS.get(_dl_asset.get("type", ""), "misc"))) \
-		.path_join(str(_dl_asset.get("slug", "")))
+	_dl_asset = asset
+	_dl_dest = dir.path_join(str(PhApi.TYPE_DIRS.get(asset.get("type", ""), "misc"))) \
+		.path_join(str(asset.get("slug", "")).validate_filename())
 	_dl_queue = [{"url": str(option.get("url", "")), "rel": PhApi.file_basename(str(option.get("url", "")))}]
 	for rel in option.get("includes", {}):
 		_dl_queue.append({"url": str(option["includes"][rel]), "rel": str(rel)})
 	_dl_next()
+	if _details.visible and str(_details.asset.get("slug", "")) == str(asset.get("slug", "")):
+		_details.refresh_state()
 
 
 func _dl_next() -> void:
+	_update_dl_badge()
 	if _dl_queue.is_empty():
 		_dl_finish()
 		return
@@ -398,19 +600,27 @@ func _dl_next() -> void:
 		_dl_req.queue_free()
 		_dl_req = null
 		if not err.is_empty():
-			_dl_queue.clear()
-			set_process(false)
-			_status.text = "Download failed (%s): %s" % [dest.get_file(), err]
+			_dl_fail(dest, err)
 			return
 		_dl_queue.pop_front()
 		_dl_next())
-	if _dl_req.request(str(job.get("url", ""))) != OK:
+	if _dl_req.request(str(job.get("url", "")), [PhApi.UA_HEADER]) != OK:
 		_dl_req.queue_free()
 		_dl_req = null
-		_dl_queue.pop_front()
-		_dl_next()
+		_dl_fail(dest, "request did not start")
 		return
 	set_process(true)
+
+
+## A failed job aborts the download loudly — clear the queue, drop the
+## orphaned .part, say so. Silently popping it would end in _dl_finish
+## reporting a success that never happened.
+func _dl_fail(dest: String, err: String) -> void:
+	DirAccess.remove_absolute(dest + ".part")
+	_dl_queue.clear()
+	set_process(false)
+	_update_dl_badge()
+	_status.text = "Download failed (%s): %s" % [dest.get_file(), err]
 
 
 func _process(_delta: float) -> void:
@@ -425,9 +635,12 @@ func _process(_delta: float) -> void:
 
 func _dl_finish() -> void:
 	set_process(false)
+	_update_dl_badge()
 	var slug := str(_dl_asset.get("slug", ""))
 	_dl_done[slug] = _dl_dest
 	_status.text = "Downloaded %s → %s" % [str(_dl_asset.get("name", slug)), A2GUI.short_path(_dl_dest)]
+	if _details.visible and str(_details.asset.get("slug", "")) == slug:
+		_details.refresh_state()
 	if _dl_dest.begins_with("res://"):
 		EditorInterface.get_resource_filesystem().scan()
 	elif _in_local_root(_dl_dest) and plugin.connection \
