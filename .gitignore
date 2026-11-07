@@ -17,3 +17,6 @@ __pycache__
 
 # Godot Launcher per-project marker
 .godotlauncher
+
+# local MCP scratch helper + probe outputs
+/tests/_*
