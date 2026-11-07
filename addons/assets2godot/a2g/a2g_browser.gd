@@ -9,6 +9,9 @@ const Icons = preload("res://addons/assets2godot/ui/icons.gd")
 const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
 const A2GThumbs = preload("res://addons/assets2godot/a2g/a2g_thumbs.gd")
 const A2GProjectView = preload("res://addons/assets2godot/a2g/a2g_project_view.tscn")
+const A2GSceneAssets = preload("res://addons/assets2godot/a2g/a2g_scene_assets.gd")
+const A2GDetails = preload("res://addons/assets2godot/a2g/a2g_details.gd")
+const A2GImportDialog = preload("res://addons/assets2godot/a2g/a2g_import_dialog.gd")
 const SEARCH_LIMIT = 500
 
 ## assets2godot/browser_display_mode editor setting: 0 = thumbnails, 1 = list.
@@ -83,6 +86,18 @@ var _dl_border: PanelContainer
 var _dl_view: VBoxContainer
 var _dl_active := false
 var _dl_fit_queued := false
+## The folded-in Assets surface (project files + open-scene resources):
+## the same A2GSceneAssets panel that used to be a main tab, swapped in
+## when a Sources "Project" row selects view mode "project"/"scene".
+var _sa_view: PanelContainer
+var _sa_mode := &""
+## The single detail popup every tile click raises — one instance,
+## re-shown like the provider tabs' asset_details.
+var _details: AcceptDialog
+## Batch-import dialog for the multi-selection and the popup's own
+## "Import into project" action.
+var _import_dialog: ConfirmationDialog
+var _import_btn: Button
 ## The SplitContainer this browser shares with the Sources dock — set by
 ## the plugin so the toolbar's split-mode button flips its orientation.
 var split: SplitContainer:
@@ -163,7 +178,16 @@ func _ready() -> void:
 	_split_btn.tooltip_text = "Change split mode — sources left/right or top/bottom."
 	_split_btn.pressed.connect(_toggle_split)
 	host.add_child(_split_btn)
-	_browser_toolbar_controls = [_search, _provider_filter, _kind_filter, _sort_btn, _refresh, _view_btn]
+	# Batch import — enabled when the multi-selection holds external
+	# files; opens the import-options dialog (staging + .import params).
+	_import_btn = Button.new()
+	_import_btn.icon = _editor_icon("Import")
+	_import_btn.theme_type_variation = "FlatButton"
+	_import_btn.tooltip_text = "Import the selected files into the project (import options included)."
+	_import_btn.disabled = true
+	_import_btn.pressed.connect(_import_selection)
+	host.add_child(_import_btn)
+	_browser_toolbar_controls = [_search, _provider_filter, _kind_filter, _sort_btn, _refresh, _view_btn, _import_btn]
 	_split_offset_h = int(340 * EditorInterface.get_editor_scale())
 	_split_offset_v = _split_offset_h
 	_update_split_icon()
@@ -178,9 +202,13 @@ func _ready() -> void:
 	# Right-click selects the row under the cursor before the context menu
 	# opens — same as FileSystemTree's allow_rmb_select.
 	_list.allow_rmb_select = true
+	# Ctrl/Shift multi-select like the FileSystem dock — plain click
+	# still opens the detail popup, selection-clicks don't.
+	_list.select_mode = ItemList.SELECT_MULTI
 	_list.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_list.item_clicked.connect(_on_list_item_clicked)
 	_list.item_activated.connect(_on_list_item_activated)
+	_list.multi_selected.connect(func(_i, _s): _update_import_btn())
 	_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(_list)
 	# The grid fills edge to edge: columns stretch by a few px so no dead
@@ -214,6 +242,19 @@ func _ready() -> void:
 	# setup() needs the BlendKit tab's Downloads model, which the gallery
 	# builds in its own _ready — ours ran first, so wire it a frame later.
 	call_deferred("_wire_downloads_view")
+
+	# The folded-in Assets surface — a self-contained panel with its own
+	# filter rows, shown for the Sources' "project"/"scene" view modes.
+	_sa_view = A2GSceneAssets.new()
+	_sa_view.plugin = plugin
+	_sa_view.visible = false
+	vbox.add_child(_sa_view)
+
+	_details = A2GDetails.new()
+	_details.import_requested.connect(_import_entries)
+	add_child(_details)
+	_import_dialog = A2GImportDialog.new()
+	add_child(_import_dialog)
 
 	_icon = Icons.render_svg(A2GUI.ICON_PATH, EditorInterface.get_editor_scale(), true)
 	_thumbs = A2GThumbs.new()
@@ -254,7 +295,7 @@ func _on_dl_browse() -> void:
 	var gallery: Control = plugin.gallery
 	if gallery == null:
 		return
-	plugin.main_tabs.current_tab = gallery.get_index()
+	plugin.select_provider(gallery)
 	gallery.project_toggle.button_pressed = false
 
 
@@ -263,10 +304,15 @@ func _on_dl_browse() -> void:
 ## hide with it, like upstream's filter row in project mode.
 func show_view_mode(mode: StringName) -> void:
 	_dl_active = mode == &"downloads" and _dl_scroll != null
+	_sa_mode = mode if mode in [&"project", &"scene"] and _sa_view != null else &""
 	if _dl_scroll != null:
 		_dl_scroll.visible = _dl_active
-	_list.visible = not _dl_active
-	_empty.visible = not _dl_active and _list.item_count == 0
+	if _sa_view != null:
+		_sa_view.visible = _sa_mode != &""
+		if _sa_mode != &"":
+			_sa_view.set_source(_sa_mode)
+	_list.visible = not _dl_active and _sa_mode == &""
+	_empty.visible = not _dl_active and _sa_mode == &"" and _list.item_count == 0
 	_update_toolbar_visibility()
 	# project is null until _wire_downloads_view ran — refresh would crash
 	# on the unset index before that.
@@ -276,7 +322,7 @@ func show_view_mode(mode: StringName) -> void:
 
 
 func _update_toolbar_visibility() -> void:
-	var hide := _dl_active or _split_mode == SplitMode.TREE_ONLY
+	var hide := _dl_active or _sa_mode != &"" or _split_mode == SplitMode.TREE_ONLY
 	for c in _browser_toolbar_controls:
 		c.visible = not hide
 
@@ -383,25 +429,72 @@ func _rebuild() -> void:
 			else "%s  ·  %s  ·  %s" % [a.get("name", "?"), a.get("kind", "?"), a.get("provider", "?")]
 		var idx := _list.add_item(label, _list_icon(str(a.get("kind", ""))))
 		_list.set_item_tooltip(idx, "%s\n%s" % [path.get_file(), A2GUI.short_path(path)])
-		_list_entries.append({"path": path, "kind": a.get("kind", ""),
+		var e := {"path": path, "kind": a.get("kind", ""),
 			"provider": a.get("provider", ""),
-			"ext": path.get_extension().to_lower()})
+			"ext": path.get_extension().to_lower()}
+		e["details"] = _show_entry_details.bind(e)
+		_list_entries.append(e)
 		_queue_preview(path, {"idx": idx, "path": path})
 		shown += 1
 	_empty.visible = shown == 0 and not _dl_active
+	# Rebuild drops the selection — the Import button follows.
+	_update_import_btn()
 
 
-## Right-click on a list row opens the same asset context menu the cards
-## show; left-click just selects (FileSystem-dock behavior).
+## A plain left-click opens the detail popup like the provider tabs'
+## cards do; Ctrl/Shift-click stays plain selection for multi-select,
+## right-click opens the context menu (FileSystem-dock behavior).
 func _on_list_item_clicked(index: int, _at: Vector2, mouse_button: int) -> void:
-	if mouse_button == MOUSE_BUTTON_RIGHT and index < _list_entries.size():
-		A2GUI.asset_context_menu(_list_entries[index], _list)
+	if index >= _list_entries.size():
+		return
+	match mouse_button:
+		MOUSE_BUTTON_LEFT:
+			if not Input.is_key_pressed(KEY_CTRL) and not Input.is_key_pressed(KEY_SHIFT):
+				_show_entry_details(_list_entries[index])
+		MOUSE_BUTTON_RIGHT:
+			A2GUI.asset_context_menu(_list_entries[index], _list)
 
 
-## Double-click = the FileSystem dock's Open action.
+## Double-click = the FileSystem dock's Open action. The click that
+## started the double may have popped details — retract it.
 func _on_list_item_activated(index: int) -> void:
+	_details.hide()
 	if index < _list_entries.size():
 		A2GUI._open_entry(_list_entries[index])
+
+
+func _show_entry_details(entry: Dictionary) -> void:
+	var idx := _list_entries.find(entry)
+	var thumb: Texture2D = _list.get_item_icon(idx) if idx >= 0 else null
+	_details.show_asset(entry, thumb)
+
+
+## Batch import entry — the details popup's "Import into project" and
+## the toolbar's Import button both land here; the dialog collects the
+## staged set, offers the importer's own options, and reports results.
+func _import_entries(entries: Array) -> void:
+	_import_dialog.open_for(entries)
+
+
+func _import_selection() -> void:
+	var entries := []
+	for idx in _list.get_selected_items():
+		if idx < _list_entries.size():
+			entries.append(_list_entries[idx])
+	_import_entries(entries)
+
+
+## Import stays a file verb — enabled only while the selection holds at
+## least one real external path.
+func _update_import_btn() -> void:
+	var ok := false
+	for idx in _list.get_selected_items():
+		if idx < _list_entries.size():
+			var p := str(_list_entries[idx].get("path", ""))
+			if p != "" and not p.begins_with("res://"):
+				ok = true
+				break
+	_import_btn.disabled = not ok
 
 
 func _list_icon(kind: String) -> Texture2D:

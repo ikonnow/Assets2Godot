@@ -5,14 +5,18 @@ extends RefCounted
 ## function here is static and network-free.
 
 const API_BASE := "https://api.polyhaven.com"
+## Polyhaven's API terms require a unique User-Agent on EVERY request
+## (https://polyhaven.com/our-api) — passed as the request headers arg.
+const UA_HEADER := "User-Agent: Assets2Godot/0.7.2 (Godot editor plugin)"
 ## OptionButton order: [label, type_slug]. "" fetches all three types.
 const TYPE_OPTIONS := [["All", ""], ["Models", "models"], ["Textures", "textures"], ["HDRIs", "hdris"]]
 ## Polyhaven's numeric asset types.
 const TYPE_IDS := {0: "hdri", 1: "texture", 2: "model"}
 ## Kind → EditorIcons name shown on cards until a thumbnail arrives.
 const TYPE_ICONS := {"model": "MeshInstance3D", "texture": "ImageTexture", "hdri": "ImageTexture"}
-## Folder names per type under the download dir — the daemon's own plural
-## type dirs, so Polyhaven files sit next to BlendKit's.
+## Folder names per type under the download root — the provider's own
+## taxonomy names (its /categories endpoints), not the daemon's BlendKit
+## dirs (models/materials/hdrs under res://bk_assets).
 const TYPE_DIRS := {"model": "models", "texture": "textures", "hdri": "hdris"}
 ## Preferred formats for the download dialog — the top-ranked one offers
 ## the suggested option. gltf imports natively, hdr for skyboxes.
@@ -21,7 +25,7 @@ const PREFERRED_FORMATS := ["gltf", "hdr", "zip", "blend", "fbx", "usd", "exr"]
 const RES_ORDER := ["512", "1k", "2k", "4k", "8k", "16k", "24k"]
 ## Sort options like the site's own list: [id, label]. "hot" is the
 ## site's popularity sort — download_count is its honest client proxy.
-const SORT_OPTIONS := [["hot", "Top Downloads"], ["latest", "Latest"], ["name", "Name"], ["random", "Random"]]
+const SORT_OPTIONS := [["Top Downloads", "hot"], ["Latest", "latest"], ["Name", "name"], ["Random", "random"]]
 const THUMB_PX := 256
 
 
@@ -33,6 +37,31 @@ static func categories_url(type_slug: String) -> String:
 	return "%s/categories/%s" % [API_BASE, type_slug]
 
 
+## The big render the site shows on the asset page — asset_img/primary,
+## vs the grid's asset_img/thumbs. height=780 is the site's own size.
+static func preview_url(slug: String) -> String:
+	return "https://cdn.polyhaven.com/asset_img/primary/%s.png?height=780" % slug.uri_encode()
+
+
+## "Greg Zaal, Jarod Guest (Sky edits)" from the {author: role} map —
+## the site shows the role only when it isn't the generic "All".
+static func authors_text(authors: Dictionary) -> String:
+	var names := PackedStringArray()
+	for name in authors:
+		var role := str(authors[name])
+		names.append(str(name) if role == "All" else "%s (%s)" % [name, role])
+	return ", ".join(names)
+
+
+## Markdown link syntax in info texts → bbcode for the RichTextLabel.
+static func md_to_bbcode(text: String) -> String:
+	var out := text
+	var re := RegEx.create_from_string("\\[([^\\]]+)\\]\\(([^)]+)\\)")
+	for m in re.search_all(out):
+		out = out.replace(m.get_string(), "[url=%s]%s[/url]" % [m.get_string(2), m.get_string(1)])
+	return out
+
+
 static func files_url(slug: String) -> String:
 	return "%s/files/%s" % [API_BASE, slug.uri_encode()]
 
@@ -41,9 +70,10 @@ static func web_url(slug: String) -> String:
 	return "https://polyhaven.com/a/%s" % slug
 
 
-## Filename for a dl.polyhaven.org URL.
+## Filename for a dl.polyhaven.org URL — query/fragment stripped: a
+## "?token=…" suffix is not a legal filename character on Windows.
 static func file_basename(url: String) -> String:
-	return url.get_file()
+	return url.get_file().split("?")[0].split("#")[0]
 
 
 ## The /assets response {slug: {...}} → a normalized asset list.
@@ -55,20 +85,43 @@ static func parse_assets(raw: Variant) -> Array:
 		var a: Variant = raw[slug]
 		if not a is Dictionary:
 			continue
+		# `_s()` not `or ""` — GDScript's `or` returns a bool, not the
+		# operand, so "https://x" or "" would yield "true". And `a.get("x","y")`
+		# only defaults on MISSING keys, not explicit `"x": null` the API sends.
 		out.append({
 			"slug": str(slug),
-			"name": str(a.get("name", slug)),
+			"name": _s(a.get("name"), str(slug)),
 			"type": str(TYPE_IDS.get(int(a.get("type", -1)), "model")),
-			"categories": a.get("categories", []),
-			"tags": a.get("tags", []),
-			"thumbnail_url": str(a.get("thumbnail_url", "")),
+			"categories": a.get("categories", []) if a.get("categories") is Array else [],
+			"tags": a.get("tags", []) if a.get("tags") is Array else [],
+			"thumbnail_url": _s(a.get("thumbnail_url")),
 			"download_count": int(a.get("download_count", 0)),
 			"date_published": int(a.get("date_published", 0)),
+			# Detail popup fields — the /assets payload carries the site's
+			# whole asset page: description, authors {name: role}, the
+			# display category path, model stats and per-type attributes.
+			"description": _s(a.get("description")),
+			"authors": a.get("authors", {}) if a.get("authors") is Dictionary else {},
+			"category": _s(a.get("category")),
+			"polycount": int(a.get("polycount", 0)),
+			"dimensions": a.get("dimensions", []) if a.get("dimensions") is Array else [],
+			"texel_density": float(a.get("texel_density", 0.0)),
+			"max_resolution": a.get("max_resolution", []) if a.get("max_resolution") is Array else [],
+			"attributes": a.get("attributes", {}) if a.get("attributes") is Dictionary else {},
+			# HDRI-only stats the site lists: dynamic range, white balance,
+			# capture date and the shoot location on their world map.
+			"evs_cap": int(a.get("evs_cap", 0)),
+			"whitebalance": int(a.get("whitebalance", 0)),
+			"coords": a.get("coords", []) if a.get("coords") is Array else [],
+			"date_taken": int(a.get("date_taken", 0)),
+			# Optional markdown note ("Edited version of [X](url)").
+			"info": _s(a.get("info")),
 		})
 	return out
 
 
-## Free-text match against name, slug, categories and tags.
+## Free-text match against name, slug, categories, tags and authors —
+## the details popup's author link searches through this too.
 static func matches(asset: Dictionary, text: String) -> bool:
 	var t := text.strip_edges().to_lower()
 	if t.is_empty():
@@ -77,6 +130,8 @@ static func matches(asset: Dictionary, text: String) -> bool:
 	for v in asset.get("categories", []):
 		hay.append(str(v))
 	for v in asset.get("tags", []):
+		hay.append(str(v))
+	for v in asset.get("authors", {}):
 		hay.append(str(v))
 	return " ".join(hay).to_lower().contains(t)
 
@@ -168,9 +223,15 @@ static func flatten_files(tree: Variant) -> Array:
 				if inc is Dictionary:
 					for rel in inc:
 						var ie: Variant = inc[rel]
-						if ie is Dictionary and ie.has("url"):
-							includes[str(rel)] = str(ie["url"])
-							total += int(ie.get("size", 0))
+						if not ie is Dictionary or not ie.has("url"):
+							continue
+						# The relative path is remote data that becomes a
+						# local path — refuse anything escaping the folder.
+						var relpath := str(rel).replace("\\", "/")
+						if relpath.begins_with("/") or ".." in relpath.split("/"):
+							continue
+						includes[relpath] = str(ie["url"])
+						total += int(ie.get("size", 0))
 				var fi := PREFERRED_FORMATS.find(str(fmt).to_lower())
 				out.append({
 					"key": "%s/%s/%s" % [fmt, res, ext],
@@ -207,6 +268,12 @@ static func pick_default(options: Array, res_hint := "2k") -> int:
 			best_d = d
 			best = i
 	return best if best >= 0 else 0
+
+
+## String guard for API fields that arrive as explicit null — str(v)
+## for present values, [param fallback] otherwise.
+static func _s(v: Variant, fallback := "") -> String:
+	return fallback if v == null else str(v)
 
 
 static func short_size(bytes: int) -> String:

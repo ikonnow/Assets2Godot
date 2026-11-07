@@ -36,9 +36,9 @@ const SOURCES_URL = "https://github.com/BlenderKit/bk_godot"
 const ISSUES_URL = "https://github.com/BlenderKit/bk_godot/issues"
 
 const gallery_scene = preload("res://addons/assets2godot/ui/gallery/gallery.tscn")
+const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
 const A2GDock = preload("res://addons/assets2godot/a2g/a2g_dock.gd")
 const A2GBrowser = preload("res://addons/assets2godot/a2g/a2g_browser.gd")
-const A2GSceneAssets = preload("res://addons/assets2godot/a2g/a2g_scene_assets.gd")
 const A2GContextPlugin = preload("res://addons/assets2godot/a2g/a2g_context_plugin.gd")
 const A2GPolyhaven = preload("res://addons/assets2godot/a2g/a2g_polyhaven.gd")
 const Auth = preload("res://addons/assets2godot/auth.gd")
@@ -115,9 +115,16 @@ var addon_version: String
 var connection: ClientConnection
 var auth: Auth
 var gallery: Control
-## The A2G main-screen tab content: BlendKit gallery + A2G browser +
-## Local Assets management as inner tabs.
-var main_tabs: TabContainer
+## The A2G main screen: a header row (provider TabBar + the right-aligned
+## "A2G" toggle) over a stack of panes. The Assets2Godot organization
+## surface is one of the panes, covering the whole content area while the
+## toggle is pressed — an overlay across all providers, not a tab.
+var main_screen: VBoxContainer
+var a2g_pane: Control
+var _tab_bar: TabBar
+var _tab_panes: Array[Control] = []
+var _a2g_button: Button
+var _a2g_dock: A2GDock
 var _ctx_fs: EditorContextMenuPlugin
 var _ctx_scene: EditorContextMenuPlugin
 
@@ -156,10 +163,15 @@ func _exit_tree() -> void:
 	if _ctx_scene:
 		remove_context_menu_plugin(_ctx_scene)
 		_ctx_scene = null
-	# The children go with the plugin; the tabs live in the main screen.
-	if main_tabs:
-		main_tabs.queue_free()
-		main_tabs = null
+	# The children go with the plugin; the panes live in the main screen.
+	if main_screen:
+		main_screen.queue_free()
+		main_screen = null
+		a2g_pane = null
+		_tab_bar = null
+		_tab_panes = []
+		_a2g_button = null
+		_a2g_dock = null
 		gallery = null
 	log_info("Plugin exited")
 
@@ -172,8 +184,8 @@ func _has_main_screen() -> bool:
 
 
 func _make_visible(visible: bool) -> void:
-	if main_tabs:
-		main_tabs.visible = visible
+	if main_screen:
+		main_screen.visible = visible
 
 
 func _get_plugin_name() -> String:
@@ -189,40 +201,63 @@ func _get_plugin_icon() -> Texture2D:
 const A2G_ICON_PATH := "res://addons/assets2godot/a2g/icon.svg"
 
 
-# The A2G main-screen tab: Scene Assets (the project's own files) first,
-# Assets2Godot (unified browser + local roots management side by side)
-# second, the untouched upstream gallery as BlendKit third.
+# The A2G main screen: a header row — the TabBar of provider tabs on the
+# left, the "A2G" toggle button at the right end — over a stack of
+# full-rect panes. The Assets2Godot organization surface is one of the
+# panes, covering the provider panes while the toggle is pressed: an
+# overlay across all providers, not another tab competing with them.
 func init_gallery() -> void:
-	main_tabs = TabContainer.new()
-	main_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	# The dock's content reaches its outer edge — the tab panel's side
-	# margins would inset every pane 2px vs the FileSystem dock's zero.
-	# Resolved through the editor's own theme like make_scroll() does —
-	# this control isn't in the tree yet and has no theme context.
-	var tbs := EditorInterface.get_base_control().get_theme_stylebox("panel", "TabContainer")
-	if tbs != null:
-		var sb: StyleBox = tbs.duplicate()
-		sb.set("content_margin_left", 0.0)
-		sb.set("content_margin_right", 0.0)
-		main_tabs.add_theme_stylebox_override("panel", sb)
-	var scene_assets := A2GSceneAssets.new()
-	scene_assets.plugin = self
-	scene_assets.name = "Assets"
-	main_tabs.add_child(scene_assets)
-	# The tab page is a MarginContainer framing a VBox: a dock-wide toolbar
-	# row over the Sources|Browser split — the FileSystem dock's toolbar
-	# sits above its split the same way, which is also why the native
-	# panels can shrink to ~0. The L/R margin is the outer frame every
-	# dock gets from its panel + slot padding — without it the secondary
-	# fields touch the window edge.
-	var tab := MarginContainer.new()
-	tab.name = "Assets2Godot"
+	main_screen = VBoxContainer.new()
+	main_screen.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	main_screen.add_theme_constant_override("separation", 0)
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", int(4 * EditorInterface.get_editor_scale()))
+	main_screen.add_child(header)
+	_tab_bar = TabBar.new()
+	_tab_bar.name = "A2GTabs"
+	_tab_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_tab_bar.deselect_enabled = false
+	# The dock-tab look comes from TabContainer's theme items — copied
+	# onto the standalone TabBar so the strip renders identically.
+	A2GUI.style_tabbar(_tab_bar)
+	_tab_bar.tab_selected.connect(_show_tab)
+	header.add_child(_tab_bar)
+	# A click on the already-selected tab leaves the A2G surface too —
+	# tab_selected only fires on change.
+	if _tab_bar.has_signal(&"tab_clicked"):
+		_tab_bar.connect(&"tab_clicked", func(_i): select_tab(_tab_bar.current_tab))
+	header.add_child(VSeparator.new())
+	_a2g_button = Button.new()
+	_a2g_button.name = "A2GToggle"
+	_a2g_button.text = "A2G"
+	_a2g_button.theme_type_variation = "FlatButton"
+	_a2g_button.toggle_mode = true
+	_a2g_button.tooltip_text = "Assets2Godot — organize indexed and project assets."
+	_a2g_button.toggled.connect(_on_a2g_toggled)
+	header.add_child(_a2g_button)
+
+	# The pane stack: every child fills the content area, exactly one
+	# visible at a time.
+	var panes := Control.new()
+	panes.name = "A2GPanes"
+	panes.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	main_screen.add_child(panes)
+	# The former "Assets" tab lives inside the A2G surface now — the
+	# Sources tree's "Project → Files / Open scene" rows swap the browser
+	# pane to the embedded A2GSceneAssets panel.
+	# The A2G pane is the former "Assets2Godot" tab content, unchanged:
+	# a MarginContainer framing a VBox — dock-wide toolbar over the
+	# Sources|Browser split — plus its context-menu injections.
+	a2g_pane = MarginContainer.new()
+	a2g_pane.name = "Assets2Godot"
 	# Left keeps the dock-panel margin; the right field reaches the main
 	# screen's edge flush — the same edge the native FileSystem dock's
 	# list reaches against the right dock column.
-	tab.add_theme_constant_override("margin_left", int(4 * EditorInterface.get_editor_scale()))
+	a2g_pane.add_theme_constant_override("margin_left", int(4 * EditorInterface.get_editor_scale()))
+	a2g_pane.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	a2g_pane.hide()
 	var tabv := VBoxContainer.new()
-	tab.add_child(tabv)
+	a2g_pane.add_child(tabv)
 	var tbar := HBoxContainer.new()
 	tabv.add_child(tbar)
 	var a2g := HSplitContainer.new()
@@ -233,6 +268,7 @@ func init_gallery() -> void:
 	a2g.dragger_visibility = SplitContainer.DRAGGER_VISIBLE
 	var local := A2GDock.new()
 	local.plugin = self
+	_a2g_dock = local
 	# Tree ops go to the left of the shared toolbar, browser controls to
 	# the right — the FileSystem dock's own toolbar layout.
 	local.toolbar_parent = tbar
@@ -253,29 +289,100 @@ func init_gallery() -> void:
 	# downloaded-to-project surface (the "Downloaded to project" row).
 	local.view_mode_selected.connect(browser.show_view_mode)
 	tabv.add_child(a2g)
-	main_tabs.add_child(tab)
+	panes.add_child(a2g_pane)
 	# A2G entries inside Godot's own context menus — FileSystem dock
 	# ("Scan folder as root") and Scene tree ("Show scene resources").
 	_ctx_fs = A2GContextPlugin.new(EditorContextMenuPlugin.CONTEXT_SLOT_FILESYSTEM)
 	_ctx_fs.add_scan_root.connect(local.add_scan_root)
 	add_context_menu_plugin(EditorContextMenuPlugin.CONTEXT_SLOT_FILESYSTEM, _ctx_fs)
 	_ctx_scene = A2GContextPlugin.new(EditorContextMenuPlugin.CONTEXT_SLOT_SCENE_TREE)
-	_ctx_scene.browse_scene_resources.connect(func(): main_tabs.current_tab = 0)
+	_ctx_scene.browse_scene_resources.connect(func(): open_a2g("scene"))
 	add_context_menu_plugin(EditorContextMenuPlugin.CONTEXT_SLOT_SCENE_TREE, _ctx_scene)
 	gallery = gallery_scene.instantiate()
 	gallery.plugin = self
 	gallery.name = "BlendKit"
-	gallery.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	main_tabs.add_child(gallery)
+	_add_tab_pane(panes, gallery)
+	# Right-click quick download on BlendKit cards too — the same compact
+	# tile remote-provider cards get, installed without upstream edits.
+	A2GUI.install_bk_quick_download(get_tree(), gallery)
 	# Polyhaven: same kind of main tab as BlendKit, but pure GDScript —
 	# the public CC0 API needs neither login nor the Client.
 	var polyhaven := A2GPolyhaven.new()
 	polyhaven.plugin = self
 	polyhaven.name = "Polyhaven"
-	polyhaven.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	main_tabs.add_child(polyhaven)
-	main_tabs.hide()
-	EditorInterface.get_editor_main_screen().add_child(main_tabs)
+	_add_tab_pane(panes, polyhaven)
+	main_screen.hide()
+	EditorInterface.get_editor_main_screen().add_child(main_screen)
+	# Provider tabs stay text-only — icon noise in the tab row was
+	# deliberately removed before; the A2G toggle on the right carries
+	# the FileSystem dock's own icon instead, reading "opens the file
+	# organization panel" rather than a logo mark.
+	for icon_name in [&"Filesystem", &"Folder"]:
+		var ic := main_screen.get_theme_icon(icon_name, "EditorIcons")
+		if ic:
+			_a2g_button.icon = ic
+			break
+	# FlatButton's pressed state tints the icon accent but leaves the
+	# font neutral — Godot's own panel toggles paint the label too.
+	var accent := main_screen.get_theme_color(&"accent_color", &"Editor")
+	_a2g_button.add_theme_color_override("font_pressed_color", accent)
+	_a2g_button.add_theme_color_override("font_hover_pressed_color", accent)
+	_tab_bar.current_tab = 0
+	_show_tab(0)
+
+
+## Registers [param pane] as a full-rect stack pane plus a TabBar tab
+## titled with the pane's name. Returns the tab index.
+func _add_tab_pane(panes: Control, pane: Control) -> int:
+	pane.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	pane.hide()
+	panes.add_child(pane)
+	_tab_panes.append(pane)
+	_tab_bar.add_tab(pane.name)
+	return _tab_bar.tab_count - 1
+
+
+## Shows TabBar tab [param idx] and closes the A2G overlay. Bound to the
+## TabBar's tab_selected and used by programmatic entry points.
+func _show_tab(idx: int) -> void:
+	if _a2g_button != null and _a2g_button.button_pressed:
+		_a2g_button.set_pressed_no_signal(false)
+	if a2g_pane != null:
+		a2g_pane.hide()
+	for i in _tab_panes.size():
+		_tab_panes[i].visible = i == idx
+
+
+func select_tab(idx: int) -> void:
+	if idx < 0 or idx >= _tab_panes.size():
+		return
+	_tab_bar.current_tab = idx
+	_show_tab(idx)
+
+
+## Switch to the tab owning [param pane] — e.g. a cross-surface link
+## jumping back to a provider tab.
+func select_provider(pane: Control) -> void:
+	select_tab(_tab_panes.find(pane))
+
+
+func _on_a2g_toggled(pressed: bool) -> void:
+	if pressed:
+		for p in _tab_panes:
+			p.hide()
+		a2g_pane.show()
+	else:
+		_show_tab(_tab_bar.current_tab)
+
+
+## Public entry: open the A2G organization surface; [param section]
+## names a Sources-tree row to select ("scene" once the Assets tab is
+## folded in — ignored until then).
+func open_a2g(section := "") -> void:
+	if _a2g_button != null:
+		_a2g_button.button_pressed = true
+	if not section.is_empty() and _a2g_dock != null:
+		_a2g_dock.select_section(section)
 
 
 # MARK: settings

@@ -7,6 +7,8 @@ extends PanelContainer
 
 const Icons = preload("res://addons/assets2godot/ui/icons.gd")
 const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
+const A2GDetails = preload("res://addons/assets2godot/a2g/a2g_details.gd")
+const A2GImportDialog = preload("res://addons/assets2godot/a2g/a2g_import_dialog.gd")
 
 const DEFAULT_MAX_SCENE_RESOURCES := 300
 const SETTING_SCENE_CAP := "assets2godot/scene_resource_cap"
@@ -54,6 +56,10 @@ var _empty: Label
 var _icon: Texture2D
 var _assets: Array = []
 var _seen: Dictionary = {}
+## Card clicks raise the same detail popup the browser list uses.
+var _details: AcceptDialog
+## External files stage through the same import dialog the browser owns.
+var _import_dialog: ConfirmationDialog
 
 
 func _ready() -> void:
@@ -120,6 +126,11 @@ func _ready() -> void:
 	vbox.add_child(_empty)
 
 	_icon = Icons.render_svg(A2GUI.ICON_PATH, EditorInterface.get_editor_scale(), true)
+	_details = A2GDetails.new()
+	_details.import_requested.connect(_import_entries)
+	add_child(_details)
+	_import_dialog = A2GImportDialog.new()
+	add_child(_import_dialog)
 	visibility_changed.connect(_on_visibility_changed)
 	_collect()
 
@@ -248,13 +259,41 @@ func _rebuild() -> void:
 			continue
 		if q != "" and not (str(a["name"]).to_lower().contains(q) or str(a["path"]).to_lower().contains(q)):
 			continue
+		var payload := {"name": a["name"], "path": a["path"], "kind": a["kind"],
+			"source": a["source"], "type": a["type"], "ext": a["ext"],
+			"res": a["res"], "node": a.get("node")}
+		payload["details"] = _show_details.bind(payload)
 		var card := A2GUI.asset_card(a["name"], a["kind"], a["source"], a["path"], _icon, a["type"],
-			{"res": a["res"], "node": a.get("node"), "ext": a["ext"]})
+			payload)
+		card.selected.connect(func(_a): _show_details(payload, card.thumb.texture))
 		_grid.add_child(card)
 		_request_preview(a, card)
 		shown += 1
 	_empty.visible = shown == 0
 	_update_columns()
+
+
+func _show_details(payload: Dictionary, thumb: Texture2D = null) -> void:
+	_details.show_asset(payload, thumb)
+
+
+## External files stage through the same import dialog the browser
+## uses; res:// payloads are filtered inside open_for.
+func _import_entries(entries: Array) -> void:
+	_import_dialog.open_for(entries)
+
+
+## Picks the Source filter by name ("project"/"scene") — the Sources
+## tree's Project rows drive it when this panel is an embedded view
+## mode rather than a standalone tab.
+func set_source(name: String) -> void:
+	if _source == null:
+		return
+	for i in _source.item_count:
+		if _source.get_item_text(i).to_lower() == name.to_lower():
+			_source.select(i)
+			_rebuild()
+			return
 
 
 func _sel(dd: OptionButton, fallback: String) -> String:
