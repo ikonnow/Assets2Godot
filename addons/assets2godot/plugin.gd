@@ -32,8 +32,8 @@ const RESOLUTION_AUTO = "auto"
 # The resolution Auto downloads.
 const AUTO_RESOLUTION = "resolution_2K"
 const USER_GUIDE_URL = "https://www.blendkit.com/blendkit-in-godot/"
-const SOURCES_URL = "https://github.com/BlenderKit/bk_godot"
-const ISSUES_URL = "https://github.com/BlenderKit/bk_godot/issues"
+const SOURCES_URL = "https://github.com/ikonnow/Assets2Godot"
+const ISSUES_URL = "https://github.com/ikonnow/Assets2Godot/issues"
 
 const gallery_scene = preload("res://addons/assets2godot/ui/gallery/gallery.tscn")
 const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")

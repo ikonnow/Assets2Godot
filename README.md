@@ -1,469 +1,280 @@
 <div align="center">
-  <img src="addons/assets2godot/logo/blendkit-logo-hexa_pure.svg" alt="Blendkit Logo" width="100"/>
-  <h1 align="center">Blendkit for Godot</h1>
-
-  A simple yet effective add-on that lets you import models
-  from the [Blendkit](https://blendkit.com) library
-  to [Godot Engine](https://godotengine.org/).
-
-  [![GitHub Release](https://img.shields.io/github/v/release/BlenderKit/bk_godot?color=green)](https://github.com/BlenderKit/bk_godot/releases/latest)
-  [![Project license](https://img.shields.io/github/license/BlenderKit/bk_godot.svg?color=orange)](LICENSE)
+  <h1 align="center">Assets2Godot</h1>
+  <p>
+    A community asset workspace for the Godot editor — browse, organize and
+    import assets from <strong>BlendKit</strong>, <strong>Polyhaven</strong>
+    and your own drives, without leaving the editor.
+  </p>
+  <p>
+    <a href="https://github.com/ikonnow/Assets2Godot/releases/latest">
+      <img src="https://img.shields.io/github/v/release/ikonnow/Assets2Godot?color=green" alt="Release">
+    </a>
+    <a href="LICENSE">
+      <img src="https://img.shields.io/github/license/ikonnow/Assets2Godot?color=orange" alt="GPLv2">
+    </a>
+  </p>
 </div>
 
-# About
+---
 
-Search the [Blendkit.com](https://blendkit.com) library right inside the
-Godot editor: open the **Blendkit** workspace, find an asset, click
-**Download**, and it lands in your project, organized and ready to use.
+## What it is
 
-![Blendkit in Godot](img/blendkit_in_godot.png)
+**Assets2Godot** is a Godot editor plugin that turns the editor into an asset
+browser and staging ground for multiple sources at once:
 
-Rely on Godot's native import, or build your own custom workflow on top of the
-downloaded files.
+- **Assets2Godot tab** — a local index over your own asset folders (plus
+  project files and open-scene resources). Files stay where they are; nothing
+  is copied into `res://` until you explicitly import an asset, which stages
+  it into `res://imported_assets/<asset_name>/`.
+- **BlendKit tab** — the full upstream Blendkit for Godot experience:
+  search, filters, plans/login, downloads into `bk_assets/`.
+- **Polyhaven tab** — the public CC0 catalog (models, textures, HDRIs,
+  fonts) via Poly Haven's API, implemented in pure GDScript — no account,
+  no helper daemon needed.
+- **A2G button** — an organization surface over the provider tabs:
+  collections, favorites, batch operations (planned, see
+  [Roadmap](#roadmap)).
 
-See [User Guide](https://www.blendkit.com/blendkit-in-godot/) for an overview,
-screenshots, and getting started guide.
-
-This project is Free and Open Source Software under GPLv2.
-
-[Contributions](#contributing) are highly encouraged and welcome 🤝
-
-⭐ Star this repo to show support and interest in continued development, thanks!
-
+It is built on top of [Blendkit for Godot](https://github.com/BlenderKit/bk_godot)
+(GPLv2) and pairs with a fork of the
+[Blendkit Client](https://github.com/ikonnow/bk_client) daemon that adds
+provider/index endpoints the upstream client doesn't have.
 
 ## Status
 
-### alpha
+**Experimental (alpha).** The core surfaces work and are tested, but the
+project is under active development — expect rough edges.
 
-Fundamentals are done: building, testing, integration, distribution and
-installation work reliably, and the **Blendkit** workspace offers decent
-usability and ergonomics. The remaining bottleneck is getting assets into
-Godot cleanly.
+| Area | State |
+|------|-------|
+| Local index browser, thumbnails, staging import | Working |
+| BlendKit tab (search/download/login/plans) | Working — upstream feature set |
+| Polyhaven provider (catalog, details, downloads) | Working — new in 0.8.0 |
+| Quick-download tile on asset cards | Working — new in 0.8.0 |
+| Organization overlay (collections, batch ops) | Planned — see `docs/plans/` |
+| Additional providers | Planned — see `docs/specs/remote-providers.md` |
 
-**IMPORTANT:** Godot's Blender import is relatively young, and many `.blend`
-files import incorrectly or not at all, with plenty of warnings and errors in
-the Godot Output. **Blender Import** in Blendkit **Settings** shows whether
-Godot can import `.blend` files and helps you find Blender. This plugin gets
-more useful as native Blender → Godot import improves.
+## Providers
 
-Set **Model Format** to **glTF (.glb)** to download glTF instead of the original
-`.blend` file. Blendkit's glTF files are exported automatically and far from
-perfect, but they work better for some assets and don't need Blender installed.
-
-More testing and polish are needed before reaching beta quality, so please
-consider this software **experimental** 🧪 for now. It's a great time to test
-and [contribute](#contributing) so that the plugin is useful for you and
-everyone else.
-
+| Provider | Catalog | Auth | Asset license |
+|----------|---------|------|---------------|
+| BlendKit | blendkit.com via the `bk_client` daemon | Optional login; free assets need none, Full Plan assets need an account | Per-asset, see blendkit.com |
+| Polyhaven | polyhaven.com public API, in-plugin HTTP | None | CC0 |
+| Local drives / project | `local_dir` provider in the daemon, indexed in place | None | Yours |
 
 ## Requirements
 
-Blendkit Godot Plugin requires:
-
-- Godot Engine: **4** (**4.4+** tested in CI)
-- OS: **Linux**, **Windows**, **macOS** (untested,
-  [reports](https://github.com/BlenderKit/bk_godot/issues) welcome)
-- Architectures: **x86_64**, **arm64**
-
-### Recommended
-
-- [Blender](https://www.blender.org/download/), the newer the better.
-  Without it, the plugin is severely limited.
-
+- **Godot Engine 4** (4.4+; CI tests 4.4.1 and 4.7.x)
+- **OS:** Windows, Linux, macOS — architectures x86_64 and arm64
+- **Recommended:** [Blender](https://www.blender.org/download/) for `.blend`
+  assets and HDR/material conversion (same as upstream)
+- The **BlendKit tab needs the `bk_client` helper daemon**. Prebuilt binaries
+  ship inside each release archive; the Polyhaven tab and the local index
+  work without it.
 
 ## Installation
 
-See [User Guide](https://www.blendkit.com/blendkit-in-godot/) for a visual overview
-of installation and usage.
+The plugin is installed per Godot project.
 
-The Plugin needs to be installed for each Godot project.
+### From a release ZIP
 
-### From the Godot Asset Store (recommended)
+Download `assets2godot_vX.Y.Z.zip` from
+[Releases](https://github.com/ikonnow/Assets2Godot/releases) (or
+[build](#building) your own):
 
-In **Godot 4.7** and newer, use the built-in **Asset Store** tab:
-
-1. Search for **Blendkit**, click the plugin and press **Download**.
-2. Go to **Project → Project Settings... → Plugins** tab.
-3. Check **Enabled** for **Blendkit**.
-
-It takes some time for a new version to reach the store due to validation.
-You can always install the latest version manually from a ZIP archive.
-
-You can also browse the plugin on the
-[Godot Asset Store](https://store.godotengine.org/asset/blendkit/blendkit/) website.
-
-### From a ZIP archive
-
-Download the `blendkit-godot_vX.Y.Z.zip` archive from
-[GitHub Releases](https://github.com/BlenderKit/bk_godot/releases)
-(or [build](#building) your own from sources), then:
-
-1. **Extract** the ZIP into your Godot project root directory (where `project.godot` is located)
-    - **DO NOT** copy `addons/` or `addons/assets2godot/` from this repo without
-    [building](#building) Client binaries first.
-2. Open your project in **Godot Editor**, go to **Project → Project Settings... → Plugins** tab
-3. Check **Enabled** for **Blendkit**
-
-If installation succeeded, you should see a new **Blendkit** workspace in the
-editor's top bar (next to **Asset Store**) as well as `Blendkit:` messages in
-editor Output.
+1. Extract the ZIP into your project root (where `project.godot` lives).
+   - **Do not** copy `addons/` from this repo without building the Client
+     binaries first — the BlendKit tab won't start without them.
+2. **Project → Project Settings… → Plugins** → enable **Assets2Godot**.
 
 ### Upgrading
 
-Always do a **clean install** when upgrading to a new version:
-
-1. Delete the `addons/assets2godot/` directory from your Godot project.
-2. Install the new version as usual (see above).
-
-This avoids stale files left over from the previous version.
-
+Always clean-install: delete `addons/assets2godot/`, then install the new
+version.
 
 ## Usage
 
-After Blendkit Godot plugin is installed and enabled in your Godot project,
-open the new **Blendkit** workspace in the top bar (next to **Asset Store**)
-of the Godot Editor.
+Open the **Assets2Godot** workspace in the editor's top bar (next to
+**Asset Store**). It hosts three tabs plus the **A2G** button:
 
-### Search and download
+### Assets2Godot tab — your own assets, indexed in place
 
-- Search by text, sort the results, and filter by type (Models, Materials,
-  HDRs, Scenes, Printables), category, polygon count, **Free only** and more.
-  **Hide procedural** leaves out procedural materials and models, whose
-  materials become a flat color in Godot. It is on for materials by default.
-  Models can be limited to **Animated** or **Rigged** ones.
-  For models, the **Format** dropdown is the **Model Format** setting:
-  **glTF (.glb)** shows only models with glTF and downloads it,
-  **Blender (.blend)** shows all.
-- Click an asset to see its details. Choose a file and click **Download** to
-  get it into `bk_assets/`. The file defaults to the **Model Format** and
-  **Resolution** settings. A thin bar along the bottom of the asset's
-  thumbnail shows the download progress, and a check mark in its corner shows
-  the asset is in the project (or an error icon when the download failed).
-- Godot can't read the EXR files of Blendkit HDRs as they are, so Blender
-  re-saves them in a lossless form Godot imports before they move into the
-  project. This uses the Blender from **Blender Import** in **Settings**, or
-  one found on your computer. Without Blender, HDRs download but Godot shows
-  them as failed imports.
-- Materials download as Godot materials (`.tres`) with their textures, which
-  Blender converts the material `.blend` into, also with the Blender from
-  **Blender Import** or one found on your computer. Drop one on a mesh in
-  the 3D view to use it. Materials map their textures triplanar at their
-  real size, so they fit any mesh without UVs, like CSG shapes. Turn off
-  **UV1 › Triplanar** to use the mesh's UVs instead, and turn on **Height**
-  for the height map, which Godot doesn't do with triplanar mapping.
-  Procedural materials have no textures to convert, so they become a flat
-  color. Without Blender, materials download as `.blend` files, which Godot
-  can't use.
-- Logging in is optional. Free assets download without an account. To
-  download Full Plan assets, click **Log In…** in the Blendkit menu at the end
-  of the search bar and log in with a Full Plan account in the browser that
-  opens.
+- The left **Sources** tree lists external asset roots, project files and
+  the open scene. The right pane browses the index: grid/list views,
+  FileSystem-style split modes, search, filters, sort, cached thumbnails.
+- Assets are **not copied** into your project automatically. Select files
+  and use the context menu to **stage** them into
+  `res://imported_assets/<asset_name>/`, where Godot's own importer (FBX,
+  glTF, `.blend` via Blender) takes over.
+- Works on disconnected drives and missing folders gracefully — index what
+  exists, re-scan when a drive comes back.
 
-Downloaded assets are organized by type and asset. For example, after
-downloading two models and one material:
+### BlendKit tab
 
-```
-bk_assets
-├── materials
-│   └── stylized-wooden-_42daf872-0c07-4f9f-bd51-2d741043096b
-│       ├── stylized-wooden-floor_2K_724059e9-51b8-4d19-8088-3a11745347a2.tres
-│       └── textures_2K
-└── models
-    ├── 19th-century-pap_6c28bfad-6678-4e85-abbc-41b36c436c96
-    │   └── 19th-century-paper-clutter-waste_2K_2e96ac1b-aae0-4c49-b352-6553f693f841.blend
-    └── wooden-lamp_84286bab-7077-4bb8-a83f-f035c71e9885
-        └── wooden-lamp_e6458d96-fe9f-4b4d-a164-c7d61974be86.blend
-```
+The upstream Blendkit experience: search blendkit.com inside the editor,
+filter by type/category/polygons/license, log in optionally (free assets
+need no account), download into `bk_assets/` organized by type and asset.
+Settings cover download directory, **Model Format** (`.blend` vs glTF),
+resolution, UUID naming, Client port and log level — see the in-plugin
+**User Guide** link for the full reference.
 
-### Project assets
+### Polyhaven tab
 
-The download toggle next to the search bar switches the **Blendkit** workspace
-to the assets downloaded to this project, with a local search and
-**Show in FileSystem**. Switch back with the toggle or **Browse Blendkit**
-below the assets.
+Browse the CC0 catalog with provider-native filters (type, categories,
+tags), sort options and a resolution hint. Asset cards open a details
+popup (metadata, files, preview renders) and offer one-click downloads of
+the chosen file variant. Downloads stage through `.part` files and land
+in your configured download directory — same staging rules as the local
+index.
 
-### Blendkit menu
+Right-click any provider card for the **quick-download tile**: a compact
+format picker + download action that works the same on BlendKit and
+Polyhaven cards.
 
-The Blendkit menu at the end of the search bar (the Blendkit logo with **⋮**)
-gathers the Client, the account and settings. The dot in the logo's corner
-shows the Blendkit Client status: green when connected, yellow while
-connecting, red when it failed and gray when it's off. The menu has:
+### A2G button
 
-- The Client status in full and **Enable Blendkit Client** to turn the Client
-  on and off.
-- **Settings** with the download directory (`res://bk_assets/` by default),
-  **Blender Import**, **Model Format** (**Blender (.blend)** by default, or
-  **glTF (.glb)**), **Resolution**, **UUIDs in Names** (**Strip** by default,
-  **Short** or **Full**), the Client **Port** and the plugin's **Log Level**.
-- **Restart Client** when it failed.
-- The account: your avatar, name and email once you're logged in (click them
-  for your profile), and your plan (click it for the plans). **Log In…** and
-  **Sign Up…** open the browser and turn the Client on if it's off, as logging
-  in goes through it. **Log Out** when logged in.
-- Links to blendkit.com, **User Guide**, **README & Sources** and the issue
-  tracker.
-- The plugin and Client versions.
-
-The login is shared through the Blendkit Client, so logging in or out in
-another Blendkit add-on (e.g. Blender's) does the same here while both run.
-The login is stored in the editor's data directory, outside your projects.
-
-### Details
-
-Thumbnails are cached in `~/blenderkit_data/godot_temp/`, outside your project.
-
-Downloads in progress go to `bk_assets/.downloads/` first. Godot doesn't scan
-hidden folders and git ignores it, so partial files are never imported or
-committed. Each file moves to its folder once complete, replacing an older
-copy, and Godot imports it. Downloads left there when the editor closed are
-deleted on the next start.
-
-You don't need a credit card to get free assets, but you can access paid assets
-should you decide to support artists with a
-[Blendkit.com](https://blendkit.com) Full Plan.
-
-You can create an empty `.gdignore` file in `bk_assets/` to prevent Godot
-auto-import.
-
+Opens the organization surface over the provider tabs (collections,
+favorites, multi-select and batch import are being built — see
+[Roadmap](#roadmap)).
 
 ## Architecture
 
 ```text
-     local machine                                          internet
-
-┌──────────────────────┐
-│    Blendkit Godot    │
-│      (GDScript)      │
-└──────────────────────┘
-           ▲
-           │
-     HTTP  │  connects to existing Blendkit Client
-           │  or spawns a new one
-           │
-           ▼
-┌──────────────────────┐            HTTPS             ┌────────────────────┐
-│   Blendkit Client    │◄────────────────────────────►│    blendkit.com    │
-│        (Go)          │     search/download/auth     │       server       |
-└──────────────────────┘                              └────────────────────┘
-           ▲
-           │
-     HTTP  │  optional login
-           │
-           ▼
-┌──────────────────────┐
-│     Web browser      │
-└──────────────────────┘
+┌──────────────────────────────┐         ┌──────────────────────────┐
+│   Assets2Godot plugin        │         │   bk_client daemon (Go)  │
+│   (GDScript, this repo)      │         │   (fork: providers,      │
+│                              │         │    sqlite index, scan)   │
+│  ┌──────────┐ ┌───────────┐ │  HTTP   └───────────┬──────────────┘
+│  │ Assets2G │ │ BlendKit  │ │◄────────────────────┤ providers:
+│  │   tab    │ │   tab     │ │                     │ blenderkit,
+│  └──────────┘ └───────────┘ │                     │ fab_vault, local_dir
+│  ┌──────────┐               │                     └───────┬──────────┘
+│  │ Polyhaven│── pure GDScript HTTP ──► polyhaven.com      │
+│  │   tab    │               │                             │ HTTPS
+│  └──────────┘               │                             ▼
+└──────────────────────────┬───┘                     blendkit.com
+                           │ optional login (browser)
+                           ▼
+                     Web browser
 ```
 
-### Weak points
-
-- **Godot ↔ Client** connection may be lost if Godot doesn't send heartbeat for
-  too long, this leads to Client auto (re)start
-
-
-## Directory Structure
-
-- `addons/assets2godot/` - Godot plugin sources (standard Godot addon path)
-- `bk_client/` - Blendkit Client sources (cloned on demand by `./dev.py build --from-source`)
-- `tests/` - pytest test suite
-- `out/` - Build output directory (generated)
-- `project.godot` - Godot project file for development and testing
-
+Design notes live in [`docs/specs/architecture.md`](docs/specs/architecture.md)
+and [`docs/specs/remote-providers.md`](docs/specs/remote-providers.md).
 
 ## Building
 
-You need the following requirements:
-
-- **Python 3** for running the `dev.py` build script
-
-Clone the repo and do a full build:
+Requires **Python 3**; `git` for client sources; **Go** only for
+`--from-source`.
 
 ```sh
-git clone https://github.com/BlenderKit/bk_godot.git
-cd bk_godot
+git clone https://github.com/ikonnow/Assets2Godot.git
+cd Assets2Godot
 python dev.py build
 ```
 
-By default this builds from a **published client release**:
-
-- downloads the latest stable patch in the supported
-[Blendkit Client](https://github.com/BlenderKit/bk_client) series as `bk_client.zip` into
-`client-dist/vX.Y.Z/` and verifies its version and manifest binary hashes
-(`./dev.py get-client-release`)
-- stages all six platform binaries before replacing the installed client, and records
-the exact version in `addons/assets2godot/client/RESOLVED_VERSION`
-- creates a distributable ZIP archive (`./dev.py build-archive`)
-
-Pin an exact supported client release with `./dev.py build --tag vX.Y.Z`.
-The API series is defined once in `client_binary.gd` as `CLIENT_API_VERSION`.
-
-Use an already downloaded bundle with
-`./dev.py build --client-bundle /path/to/bk_client.zip`. Published Windows binaries
-are signed; macOS binaries are signed and notarized; Linux binaries are unsigned.
-Local builds and draft/testing workflow artifacts are unsigned. Manifest hashes
-check integrity; they do not independently authenticate the publisher.
-
-The distributable ZIP will be at `out/blendkit-godot_vX.Y.Z.zip`.
-
-### Building the client from source
-
-To compile the client yourself instead of using a release (requires **Go** and
-**git**):
+By default this downloads the newest stable `bk_client` release from
+[ikonnow/bk_client](https://github.com/ikonnow/bk_client) (version pinned
+by `CLIENT_API_VERSION` in `client_binary.gd`), verifies manifest sizes and
+SHA-256 hashes, stages the binaries and assembles
+`out/assets2godot_vX.Y.Z.zip`.
 
 ```sh
-./dev.py build --from-source
+python dev.py build --tag vX.Y.Z            # pin an exact client release
+python dev.py build --from-source           # compile the client from source
+python dev.py build --client-dir ../bk_client
+python dev.py build --client-bundle bk_client.zip
 ```
 
-This clones [Blendkit Client](https://github.com/BlenderKit/bk_client) into
-`bk_client/`, builds an unsigned host-platform `out/vX.Y.Z/bk_client.zip`, and assembles a
-`_local-<os>-<arch>.zip` development archive. Current client sources use CGO and
-require a native C toolchain plus the platform libraries required by bk_client.
-The source version must belong to the supported API series.
-
-Use an existing sibling checkout with:
-
-```sh
-./dev.py build --client-dir ../bk_client
-```
-
-An explicit `--client-dir` implies `--from-source`. Existing checkouts are reused
-without pulling or changing branches, including local uncommitted changes.
-Without either option, `build` continues to use published client binaries.
-
-To install its previously built bundle without recompiling:
-`./dev.py build-plugin --client-dir ../bk_client`. Follow with
-`./dev.py build-archive --allow-partial-client` for a local archive.
-The default archive command requires all six platforms for distribution.
-
-At runtime Godot uses the resolved version and `bk_client-<os>-<arch>` executable.
-It normally copies that executable into `~/blenderkit_data/client/bin/vX.Y.Z/`,
-falling back to the bundled copy if the shared directory is unavailable. Discovery
-requires the supported API series and at least the bundled patch. Godot keeps its
-versioned `/godot/report` contract and unsubscribes without terminating a shared client.
-
+`--from-source` clones the `bk_client` fork, builds an unsigned
+host-platform bundle and produces a `_local-<os>-<arch>.zip` development
+archive. Fork releases are currently **unsigned** — macOS/Windows binaries
+trigger Gatekeeper/SmartScreen warnings; that's expected until signing
+secrets are configured in the fork's CI.
 
 ## Development
 
-This repository is set up as a Godot project, so you can open it directly in
-Godot Editor for development and testing.
+This repository is itself a Godot project — open it in the editor for
+development and testing.
 
-1. Clone this repository
-2. Build (downloads the client release and assembles the plugin):
-   ```sh
-   ./dev.py build
-   ```
-3. Open the project in Godot Editor
-4. Make changes to the plugin in `addons/assets2godot/`
-5. Test your changes directly in the editor
-
-Run `python dev.py` for a list of all available commands.
+```sh
+python dev.py build     # client binaries + plugin archive
+python dev.py           # all commands
+```
 
 | Command | Description |
 |---------|-------------|
-| `build` | Full build from a published client release: download + plugin + archive |
-| `get-client-release` | Download a published client release and install its binaries |
-| `get-client-src` | Clone/update Blendkit Client repository |
+| `build` | Full build: client release/source + plugin + archive |
+| `get-client-release` | Download a published client release |
+| `get-client-src` | Clone the `bk_client` fork |
 | `build-client` | Build only the Go client |
-| `build-plugin` | Copy client binaries into plugin directory |
-| `build-archive` | Create filtered ZIP archive of the plugin |
-| `clean` | Remove build artifacts (`out/` and client binaries) |
-| `set-version` | Set plugin version in `plugin.cfg` |
-| `test` | Run pytest tests |
-| `test-e2e` | Run the live gallery and browser-to-Godot end-to-end tests |
-
-Run `./dev.py <command> --help` for command-specific options.
-
+| `build-plugin` | Install client binaries into the plugin |
+| `build-archive` | Create the distributable ZIP |
+| `test` | Run the pytest suite (headless Godot) |
+| `test-e2e` | Live end-to-end tests (needs network) |
 
 ## Testing
 
-Install the development dependencies, build the plugin with its Client binaries,
-and make sure Godot 4 is available as `godot` or `godot4` (or through the
-`GODOT`/`GODOT4` environment variable):
-
 ```sh
 pip install -r requirements-dev.txt
-./dev.py build
+python dev.py build
+python dev.py test          # pytest, parallel with pytest-xdist
 ```
 
-### Normal tests
+Godot 4 must be on `PATH` as `godot`/`godot4` or via `GODOT`/`GODOT4`.
+E2E tests hit the live Blendkit site and need `BLENDERKIT_API_KEY` only
+for gated assets; `python dev.py test-e2e` runs them (Playwright Chromium
+required for the browser test).
 
-Run the default test suite with:
+The `tests/test_*.gd` suites are MCP-driven and run inside a live editor
+with the godot-ai addon — they're dev tooling, not part of CI.
 
-```sh
-./dev.py test
-```
+## Roadmap
 
-These tests use pytest and run Godot in headless editor mode, in parallel when
-`pytest-xdist` is installed. They do not access the live Blendkit website, and
-the live E2E tests are excluded by default. Use `-v` for verbose output or
-`-k <pattern>` to select tests:
+- **Organization overlay** — collections, favorites, multi-select and
+  batch import across providers (design:
+  [`docs/plans/2026-11-07-a2g-org-overlay.md`](docs/plans/2026-11-07-a2g-org-overlay.md)).
+- **More providers** — the provider contract is documented in
+  [`docs/specs/remote-providers.md`](docs/specs/remote-providers.md); a
+  step-by-step skill for adding one lives in
+  [`.devin/skills/add-asset-provider/`](.devin/skills/add-asset-provider/SKILL.md).
+- **Client signing** — publish signed `bk_client` binaries once
+  certificate secrets are configured in the fork.
+- **Godot Asset Store** listing once the release line stabilizes.
 
-```sh
-./dev.py test -v
-./dev.py test -k plugin_enables
-```
+## Credits & License
 
-### Live E2E tests
+Assets2Godot is Free and Open Source Software under **GPLv2**.
 
-Install Playwright's Chromium browser once, then run the E2E suite:
+It is based on [Blendkit for Godot](https://github.com/BlenderKit/bk_godot)
+by **Jakub Ruzicka** and **Andreas Gajdosik** (BlenderKit s.r.o.) — upstream
+history, license and notices are preserved. The `bk_client` helper is a
+fork of [BlenderKit/bk_client](https://github.com/BlenderKit/bk_client).
 
-```sh
-playwright install chromium
-./dev.py test-e2e -v
-```
+The Polyhaven tab uses the Poly Haven logo under the permission stated in
+their [API terms](https://polyhaven.com/our-api); see
+[`addons/assets2godot/logo/LICENSE`](addons/assets2godot/logo/LICENSE) for
+the full attribution notes.
 
-On a fresh Linux system, `playwright install --with-deps chromium` also installs
-the required system packages.
+## Support
 
-Each E2E test starts Godot with the bundled Client in a temporary project, so
-nothing is downloaded into this one. They require internet access:
+Assets2Godot is maintained in my spare time. If it saves you time, you can
+support the work voluntarily via
+[**ingmar.konnow.de/support**](https://ingmar.konnow.de/#/portal/support)
+(Stripe, any amount — donations are appreciated, not required, and don't
+entitle you to support or priority).
 
-- The gallery test searches from the gallery, waits for the thumbnails, and
-  downloads a free glTF model from the details dialog. The model must end up
-  imported in the project, marked as downloaded and indexed.
-- The browser test opens a real asset page on Blendkit.com in Chromium, clicks
-  **Send to Godot**, and waits for the gallery to show the download, move it
-  into `bk_assets/`, and look the asset up for its name and thumbnail. The
-  request goes to the test's editor, even when other Godot editors are open.
+For bugs and feature requests, please use
+[GitHub Issues](https://github.com/ikonnow/Assets2Godot/issues) — the
+better the description, the easier the fix. For professional collaboration
+(migrations, pipeline work, Unreal→Godot tooling), reach out via
+[ingmar.konnow.de](https://ingmar.konnow.de) or `ingmar@konnow.de`.
 
-Use `--headed` to watch the browser, or `-k <pattern>` to select E2E tests:
-
-```sh
-./dev.py test-e2e --headed
-```
-
-`BLENDERKIT_API_KEY` is optional and only needed when overriding the default
-free asset with one that requires authentication. `BLENDERKIT_E2E_SITE` and
-`BLENDERKIT_E2E_ASSET` can point the test at another deployment or asset.
-
-If Cloudflare serves its human-verification page to an automated runner, the
-browser test is reported as skipped and saves `tests/e2e_failure.png` for diagnostics.
-Other unexpected pages and failures in the browser-to-Client download flow
-still fail the test.
-
-
-## Releasing
-
-Releases are automated via GitHub Actions. To create a new release:
-
-```sh
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-This will:
-1. Update the version in `plugin.cfg` to match the tag
-2. Build the plugin with the Blendkit Client
-3. Create a GitHub release with the ZIP attached
-
+Related project: **UE2Godot** — an Unreal Engine 5 → Godot 4 exporter
+that keeps levels playable (lights, collision, volumes, audio arrive as
+working Godot nodes, not a flat mesh dump).
 
 ## Contributing
 
-This project is Free and Open Source Software under GPLv2.
-
-**Contributions are highly encouraged and welcome 🤝**
-
-If you hit a bug or you wish something worked better, simply open a GitHub
-[Issue](https://github.com/BlenderKit/bk_godot/issues).
-
-The better you describe the problem, the easier it will be to fix.
+Contributions are welcome — see [Issues](https://github.com/ikonnow/Assets2Godot/issues)
+and the provider spec for where new work fits. Please keep changes
+merge-safe with upstream where practical (see `AGENTS.md`).
