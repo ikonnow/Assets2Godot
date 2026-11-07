@@ -95,7 +95,7 @@ static func asset_card(title: String, kind: String, source: String, path: String
 ## upstream uses internally (navigate_to_path, edit_resource,
 ## open_scene_from_path, edit_node, reimport_files, clipboard_set,
 ## shell_show_in_file_manager).
-enum AssetMenu { SHOW_FS, OPEN, EDIT_RES, SELECT_NODE, COPY_NODE_PATH, REIMPORT, SHOW_FM, COPY_PATH, STAGE }
+enum AssetMenu { SHOW_FS, OPEN, EDIT_RES, SELECT_NODE, COPY_NODE_PATH, REIMPORT, SHOW_FM, COPY_PATH, STAGE, PH_DOWNLOAD, PH_WEB, PH_COPY, PH_FM }
 
 
 static func _on_card_gui_input(item: Control, ev: InputEvent) -> void:
@@ -111,6 +111,22 @@ static func _on_card_gui_input(item: Control, ev: InputEvent) -> void:
 static func asset_context_menu(entry: Dictionary, card: Control) -> void:
 	var menu := PopupMenu.new()
 	card.add_child(menu)
+	# Polyhaven cards carry no local path — their menu is remote:
+	# download the asset, open its page, or reveal a finished download.
+	var ph_slug := str(entry.get("ph_slug", ""))
+	if ph_slug != "":
+		if entry.get("ph_download") is Callable:
+			menu.add_icon_item(_menu_icon("AssetLib"), "Download", AssetMenu.PH_DOWNLOAD)
+		var ph_dir := entry.get("ph_dir")
+		if ph_dir is Callable and str(ph_dir.call()) != "":
+			menu.add_icon_item(_menu_icon("Folder"), "Show in File Manager", AssetMenu.PH_FM)
+		menu.add_icon_item(_menu_icon("ExternalLink"), "Open on polyhaven.com", AssetMenu.PH_WEB)
+		menu.add_icon_item(_menu_icon("ActionCopy"), "Copy page URL", AssetMenu.PH_COPY)
+		menu.id_pressed.connect(func(id): _on_asset_menu(id, entry))
+		menu.popup_hide.connect(menu.queue_free)
+		menu.position = card.get_screen_position() + card.get_local_mouse_position()
+		menu.popup()
+		return
 	var path := str(entry.get("path", ""))
 	var is_res_file := path.begins_with("res://")
 	var is_os_file := path != "" and (is_res_file or FileAccess.file_exists(path))
@@ -197,6 +213,20 @@ static func _on_asset_menu(id: int, entry: Dictionary) -> void:
 			DisplayServer.clipboard_set(path)
 		AssetMenu.STAGE:
 			stage_into_project(entry)
+		AssetMenu.PH_DOWNLOAD:
+			var cb: Variant = entry.get("ph_download")
+			if cb is Callable and cb.is_valid():
+				cb.call()
+		AssetMenu.PH_FM:
+			var dir_cb: Variant = entry.get("ph_dir")
+			if dir_cb is Callable and dir_cb.is_valid():
+				var dir := str(dir_cb.call())
+				if dir != "":
+					OS.shell_show_in_file_manager(dir)
+		AssetMenu.PH_WEB:
+			OS.shell_open(str(entry.get("ph_url", "")))
+		AssetMenu.PH_COPY:
+			DisplayServer.clipboard_set(str(entry.get("ph_url", "")))
 
 
 ## Copies an external file into res://imported_assets/<name>/ and lets
