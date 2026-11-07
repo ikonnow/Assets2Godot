@@ -8,10 +8,13 @@ extends PanelContainer
 const Icons = preload("res://addons/assets2godot/ui/icons.gd")
 const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
 const A2GThumbs = preload("res://addons/assets2godot/a2g/a2g_thumbs.gd")
+const SizeFilter = preload("res://addons/assets2godot/a2g/a2g_size_filter.gd")
 const SEARCH_LIMIT = 500
 
 ## assets2godot/browser_display_mode editor setting: 0 = thumbnails, 1 = list.
 const SETTING_VIEW := "assets2godot/browser_display_mode"
+## assets2godot/browser_thumbnail_size: tile icon px at 1x editor scale.
+const SETTING_THUMB := "assets2godot/browser_thumbnail_size"
 enum View { GRID, LIST }
 
 ## Kind → EditorIcons name for the list view's rows — same names the
@@ -35,6 +38,7 @@ var _list: ItemList
 var _empty: Label
 var _icon: Texture2D
 var _thumbs: Node
+var _size_filter: Button
 var _assets: Array = []
 var _preview_map := {}
 var _view_mode := View.GRID
@@ -43,32 +47,43 @@ var _split_btn: Button
 ## The SplitContainer this browser shares with the Sources dock — set by
 ## the plugin so the toolbar's split-mode button flips its orientation.
 var split: SplitContainer
+## Where the toolbar controls go. The plugin hands the tab-level toolbar
+## row so the panel itself can shrink to the ItemList's minimum — the
+## FileSystem dock's own toolbar spans the whole dock, it isn't inside
+## the file panel. Standalone use falls back to a row on top of the panel.
+var toolbar_parent: Container
 
 
 func _ready() -> void:
+	# Thin the panel frame so the ItemListSecondary field nearly reaches
+	# the split edge — the native file list has no outer margin around it.
+	var sb: StyleBox = get_theme_stylebox("panel").duplicate()
+	var edge := int(2 * EditorInterface.get_editor_scale())
+	for m in ["content_margin_left", "content_margin_top", "content_margin_right", "content_margin_bottom"]:
+		sb.set(m, edge)
+	add_theme_stylebox_override("panel", sb)
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
 	add_child(vbox)
 
-	# Search row — same shape as the BlendKit gallery.
-	var search_row := HBoxContainer.new()
-	vbox.add_child(search_row)
+	# Toolbar — host is the injected dock-wide row or a local fallback.
+	var host: Container = toolbar_parent if toolbar_parent != null else HBoxContainer.new()
+	if toolbar_parent == null:
+		vbox.add_child(host)
 	_search = LineEdit.new()
 	_search.placeholder_text = "Search indexed assets (ENTER to search)"
 	_search.clear_button_enabled = true
 	_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_search.text_submitted.connect(func(_q): _reload())
-	search_row.add_child(_search)
-	# Provider/kind filters inline — the native file panel keeps a single
-	# toolbar row (nav, path, filter, mode buttons).
+	host.add_child(_search)
 	_provider_filter = OptionButton.new()
 	_provider_filter.tooltip_text = "Filter by provider."
 	_provider_filter.item_selected.connect(func(_i): _rebuild())
-	search_row.add_child(_provider_filter)
+	host.add_child(_provider_filter)
 	_kind_filter = OptionButton.new()
 	_kind_filter.tooltip_text = "Filter by asset kind."
 	_kind_filter.item_selected.connect(func(_i): _rebuild())
-	search_row.add_child(_kind_filter)
+	host.add_child(_kind_filter)
 	_refresh = Button.new()
 	_refresh.icon = _editor_icon("Reload")
 	if _refresh.icon == null:
@@ -76,32 +91,33 @@ func _ready() -> void:
 	_refresh.tooltip_text = "Reload the index."
 	_refresh.theme_type_variation = "FlatButton"
 	_refresh.pressed.connect(_reload)
-	search_row.add_child(_refresh)
+	host.add_child(_refresh)
 	# Grid/list toggle — the FileSystem dock's own mode icons.
 	_view_toggle = Button.new()
 	_view_toggle.theme_type_variation = "FlatButton"
 	_view_toggle.toggle_mode = true
 	_view_toggle.pressed.connect(_toggle_view)
-	search_row.add_child(_view_toggle)
+	host.add_child(_view_toggle)
 	_view_mode = _setting(SETTING_VIEW, View.GRID)
-	_update_view_flags()
+	# Tile-size picker — the gallery's Polygons-slider shape, one handle.
+	_size_filter = SizeFilter.new()
+	_size_filter.setup(_thumb_px())
+	_size_filter.size_changed.connect(_on_thumb_size)
+	host.add_child(_size_filter)
 	# Split-mode toggle — the FS dock puts display_mode at the right end of
 	# the file panel's toolbar, not on the tree side.
 	_split_btn = Button.new()
 	_split_btn.theme_type_variation = "FlatButton"
 	_split_btn.tooltip_text = "Change split mode — sources left/right or top/bottom."
 	_split_btn.pressed.connect(_toggle_split)
-	search_row.add_child(_split_btn)
+	host.add_child(_split_btn)
 	_update_split_icon()
 
 	# The FileSystem dock's file panel: one ItemListSecondary whose
 	# icon_mode switches between the dock's two display modes —
 	# FILE_DISPLAY_THUMBNAILS (ICON_MODE_TOP, fixed tiles, previews as
-	# icons) and FILE_DISPLAY_LIST (ICON_MODE_LEFT, compact rows).
-	var margin := MarginContainer.new()
-	margin.theme_type_variation = "NoBorderAssetLib"
-	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	vbox.add_child(margin)
+	# icons) and FILE_DISPLAY_LIST (ICON_MODE_LEFT, compact rows). It sits
+	# directly in the panel — the native file list has zero margin around it.
 	_list = ItemList.new()
 	_list.theme_type_variation = "ItemListSecondary"
 	# Right-click selects the row under the cursor before the context menu
@@ -111,10 +127,13 @@ func _ready() -> void:
 	_list.item_clicked.connect(_on_list_item_clicked)
 	_list.item_activated.connect(_on_list_item_activated)
 	_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	margin.add_child(_list)
+	vbox.add_child(_list)
 	_update_view_flags()
 	_empty = Label.new()
-	_empty.text = "No indexed assets yet.\nAdd folders and press Scan in the Local Assets tab."
+	_empty.text = "No indexed assets yet.\nAdd folders and press Scan in the Sources panel."
+	# Like the status line in the Sources dock: clipped text must not
+	# widen the split panel's minimum width.
+	_empty.clip_text = true
 	_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_empty.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_empty.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -261,15 +280,26 @@ func _update_view_flags() -> void:
 		_list.max_columns = 1
 		_list.same_column_width = false
 	else:
-		# EditorFileDialog's thumbnail_size (editor setting, default 64) is
-		# the tile size the FS dock uses; columns are 1.5x that.
-		var thumb := int(_setting("filesystem/file_dialog/thumbnail_size", 64))
+		# Tile size from the size picker (defaults to the dock's own
+		# thumbnail_size on first run); columns are 1.5x like upstream.
+		var thumb := _thumb_px()
 		_list.icon_mode = ItemList.ICON_MODE_TOP
 		_list.fixed_column_width = int(thumb * 1.5 * edscale)
 		_list.fixed_icon_size = Vector2i(int(thumb * edscale), int(thumb * edscale))
 		_list.max_text_lines = 2
 		_list.max_columns = 0
 		_list.same_column_width = false
+
+
+## Tile icon size in px at 1x scale: the user's pick, falling back to the
+## FileSystem dock's own thumbnail_size so first run matches the dock.
+func _thumb_px() -> int:
+	return int(_setting(SETTING_THUMB, int(_setting("filesystem/file_dialog/thumbnail_size", 64))))
+
+
+func _on_thumb_size(px: int) -> void:
+	_set_setting(SETTING_THUMB, px)
+	_update_view_flags()
 
 
 ## Editor settings helpers — assets2godot/* values registered by the

@@ -198,8 +198,15 @@ func init_gallery() -> void:
 	scene_assets.plugin = self
 	scene_assets.name = "Assets"
 	main_tabs.add_child(scene_assets)
+	# The tab is a VBox: a dock-wide toolbar row over the Sources|Browser
+	# split — the FileSystem dock's toolbar sits above its split the same
+	# way, which is also why the native panels can shrink to ~0.
+	var tab := VBoxContainer.new()
+	tab.name = "Assets2Godot"
+	var tbar := HBoxContainer.new()
+	tab.add_child(tbar)
 	var a2g := HSplitContainer.new()
-	a2g.name = "Assets2Godot"
+	a2g.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	# Dock-style dragger: the editor theme's split separation is a few px —
 	# technically draggable but undiscoverable. A fatter strip + the visible
 	# grab handle reads like the Scene/FileSystem split.
@@ -207,13 +214,13 @@ func init_gallery() -> void:
 	a2g.add_theme_constant_override("separation", int(8 * EditorInterface.get_editor_scale()))
 	var local := A2GDock.new()
 	local.plugin = self
-	# Small minimums keep the dragger's travel nearly edge-to-edge, like
-	# the FileSystem dock's own split — the panel never gets "stuck".
-	local.custom_minimum_size = Vector2(150, 0)
+	# Tree ops go to the left of the shared toolbar, browser controls to
+	# the right — the FileSystem dock's own toolbar layout.
+	local.toolbar_parent = tbar
 	a2g.add_child(local)
 	var browser := A2GBrowser.new()
 	browser.plugin = self
-	browser.custom_minimum_size = Vector2(180, 0)
+	browser.toolbar_parent = tbar
 	browser.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	a2g.add_child(browser)
 	a2g.split_offset = int(340 * EditorInterface.get_editor_scale())
@@ -223,7 +230,8 @@ func init_gallery() -> void:
 	# A finished scan reindexes — refresh the browser so results appear
 	# without a manual search.
 	local.scanned.connect(browser.refresh)
-	main_tabs.add_child(a2g)
+	tab.add_child(a2g)
+	main_tabs.add_child(tab)
 	# A2G entries inside Godot's own context menus — FileSystem dock
 	# ("Scan folder as root") and Scene tree ("Show scene resources").
 	_ctx_fs = A2GContextPlugin.new(EditorContextMenuPlugin.CONTEXT_SLOT_FILESYSTEM)

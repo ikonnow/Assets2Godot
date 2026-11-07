@@ -10,6 +10,10 @@ signal scanned
 ## endpoints and its settings store.
 
 var plugin: EditorPlugin
+## Shared dock-wide toolbar injected by the plugin — the FS dock keeps
+## tree ops in the dock-wide toolbar too, so this panel can shrink to
+## the tree's own minimum. Standalone use falls back to a row in the panel.
+var toolbar_parent: Container
 
 var _status: Label
 var _tree: Tree
@@ -28,36 +32,51 @@ func _ready() -> void:
 	# only the auto-generated node name is replaced.
 	if name == "" or name.begins_with("@"):
 		name = "Assets2Godot"
+	# Thin the panel frame so the dark TreeSecondary field nearly reaches
+	# the split edge — same treatment as the browser panel.
+	var sb: StyleBox = get_theme_stylebox("panel").duplicate()
+	var edge := int(2 * EditorInterface.get_editor_scale())
+	for m in ["content_margin_left", "content_margin_top", "content_margin_right", "content_margin_bottom"]:
+		sb.set(m, edge)
+	add_theme_stylebox_override("panel", sb)
 	var vbox := VBoxContainer.new()
 	add_child(vbox)
 
-	var head := HBoxContainer.new()
-	vbox.add_child(head)
 	var title := Label.new()
 	title.text = "Sources"
 	title.theme_type_variation = "HeaderSmall"
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	head.add_child(title)
-	_add = _head_button(head, "", "Add a directory to the local_dir provider's scan roots.")
+	var host: Container = toolbar_parent if toolbar_parent != null else HBoxContainer.new()
+	# With the shared toolbar the caption leads it (the FS dock's left end
+	# too); standalone it sits on top of the panel.
+	(toolbar_parent if toolbar_parent != null else vbox).add_child(title)
+	if toolbar_parent == null:
+		vbox.add_child(host)
+	_add = _head_button(host, "", "Add a directory to the local_dir provider's scan roots.")
 	_add.icon = _icon("Add")
 	_add.flat = true
 	_add.pressed.connect(_on_add)
-	_remove = _head_button(head, "", "Remove the selected scan root, or adopt a detected one.")
+	_remove = _head_button(host, "", "Remove the selected scan root, or adopt a detected one.")
 	_remove.icon = _icon("Remove")
 	_remove.flat = true
 	_remove.pressed.connect(_on_remove)
 	_remove.disabled = true
-	_refresh = _head_button(head, "", "Reload providers and their roots.")
+	_refresh = _head_button(host, "", "Reload providers and their roots.")
 	_refresh.icon = _icon("Reload")
 	_refresh.flat = true
 	_refresh.pressed.connect(_on_refresh)
-	_scan = _head_button(head, "", "Walk the configured roots and index their assets.")
+	_scan = _head_button(host, "", "Walk the configured roots and index their assets.")
 	_scan.icon = _icon("Play")
 	_scan.flat = true
 	_scan.pressed.connect(_on_scan)
+	if toolbar_parent != null:
+		host.add_child(VSeparator.new())
 
 	_status = Label.new()
 	_status.text = "Client: …"
+	# clip_text lets the label shrink below its text width — a long status
+	# line must not widen the split panel's minimum (the FileSystem dock's
+	# tree side goes to ~40px).
+	_status.clip_text = true
 	vbox.add_child(_status)
 
 	_tree = Tree.new()
@@ -107,6 +126,7 @@ func _on_stopped() -> void:
 func _update_state() -> void:
 	var connected: bool = plugin.connection != null and plugin.connection.is_client_connected()
 	_status.text = "Client: %s (port %s)" % [plugin.connection.status_text(), plugin.connection.port] if plugin.connection else "Client: unavailable"
+	_status.tooltip_text = _status.text
 	_refresh.disabled = not connected
 	_scan.disabled = not connected
 	_add.disabled = not connected
