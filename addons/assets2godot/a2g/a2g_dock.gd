@@ -32,13 +32,9 @@ func _ready() -> void:
 	# only the auto-generated node name is replaced.
 	if name == "" or name.begins_with("@"):
 		name = "Assets2Godot"
-	# Thin the panel frame so the dark TreeSecondary field nearly reaches
-	# the split edge — same treatment as the browser panel.
-	var sb: StyleBox = get_theme_stylebox("panel").duplicate()
-	var edge := int(2 * EditorInterface.get_editor_scale())
-	for m in ["content_margin_left", "content_margin_top", "content_margin_right", "content_margin_bottom"]:
-		sb.set(m, edge)
-	add_theme_stylebox_override("panel", sb)
+	# No panel frame — the native tree pane is pure FileSystemTree with
+	# zero margin; TreeSecondary is the boundary, like the browser side.
+	add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 	var vbox := VBoxContainer.new()
 	add_child(vbox)
 
@@ -68,8 +64,6 @@ func _ready() -> void:
 	_scan.icon = _icon("Play")
 	_scan.flat = true
 	_scan.pressed.connect(_on_scan)
-	if toolbar_parent != null:
-		host.add_child(VSeparator.new())
 
 	_status = Label.new()
 	_status.text = "Client: …"
@@ -77,7 +71,11 @@ func _ready() -> void:
 	# line must not widen the split panel's minimum (the FileSystem dock's
 	# tree side goes to ~40px).
 	_status.clip_text = true
-	vbox.add_child(_status)
+	# With the shared toolbar the status joins the sources cluster — the
+	# native tree pane is pure tree with no chrome lines inside.
+	(toolbar_parent if toolbar_parent != null else vbox).add_child(_status)
+	if toolbar_parent != null:
+		host.add_child(VSeparator.new())
 
 	_tree = Tree.new()
 	_tree.hide_root = true
