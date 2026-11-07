@@ -194,6 +194,16 @@ const A2G_ICON_PATH := "res://addons/assets2godot/a2g/icon.svg"
 func init_gallery() -> void:
 	main_tabs = TabContainer.new()
 	main_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	# The dock's content reaches its outer edge — the tab panel's side
+	# margins would inset every pane 2px vs the FileSystem dock's zero.
+	# Resolved through the editor's own theme like make_scroll() does —
+	# this control isn't in the tree yet and has no theme context.
+	var tbs := EditorInterface.get_base_control().get_theme_stylebox("panel", "TabContainer")
+	if tbs != null:
+		var sb: StyleBox = tbs.duplicate()
+		sb.set("content_margin_left", 0.0)
+		sb.set("content_margin_right", 0.0)
+		main_tabs.add_theme_stylebox_override("panel", sb)
 	var scene_assets := A2GSceneAssets.new()
 	scene_assets.plugin = self
 	scene_assets.name = "Assets"
