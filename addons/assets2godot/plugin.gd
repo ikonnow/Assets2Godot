@@ -207,11 +207,10 @@ func init_gallery() -> void:
 	tab.add_child(tbar)
 	var a2g := HSplitContainer.new()
 	a2g.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	# Dock-style dragger: the editor theme's split separation is a few px —
-	# technically draggable but undiscoverable. A fatter strip + the visible
-	# grab handle reads like the Scene/FileSystem split.
+	# The theme's own split separation (~3px — same gap the FileSystem
+	# dock shows between its panes); the visible grab handle keeps it
+	# discoverable without widening the gap.
 	a2g.dragger_visibility = SplitContainer.DRAGGER_VISIBLE
-	a2g.add_theme_constant_override("separation", int(8 * EditorInterface.get_editor_scale()))
 	var local := A2GDock.new()
 	local.plugin = self
 	# Tree ops go to the left of the shared toolbar, browser controls to

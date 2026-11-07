@@ -55,13 +55,10 @@ var toolbar_parent: Container
 
 
 func _ready() -> void:
-	# Thin the panel frame so the ItemListSecondary field nearly reaches
-	# the split edge — the native file list has no outer margin around it.
-	var sb: StyleBox = get_theme_stylebox("panel").duplicate()
-	var edge := int(2 * EditorInterface.get_editor_scale())
-	for m in ["content_margin_left", "content_margin_top", "content_margin_right", "content_margin_bottom"]:
-		sb.set(m, edge)
-	add_theme_stylebox_override("panel", sb)
+	# No panel frame at all — the native file list has zero margin around
+	# it and the ItemListSecondary background IS the boundary. The fields
+	# must reach the split edge exactly.
+	add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 10)
 	add_child(vbox)
