@@ -27,9 +27,11 @@ for _stream in (sys.stdout, sys.stderr):
 PLUGIN_SRC_DIR = "addons"
 PLUGIN_DIR = "assets2godot"
 CLIENT_DIR = "bk_client"
-CLIENT_REPO_URL = "https://github.com/BlenderKit/bk_client.git"
+# Fork of BlenderKit/bk_client carrying the A2G provider/index endpoints —
+# upstream releases lack them, so builds must come from this repo.
+CLIENT_REPO_URL = "https://github.com/ikonnow/bk_client.git"
 CLIENT_REPO_REF = "main"
-CLIENT_REPO = "BlenderKit/bk_client"
+CLIENT_REPO = "ikonnow/bk_client"
 CLIENT_ASSET = "bk_client.zip"
 CLIENT_BINARIES = {
     f"bk_client-{platform}-{arch}{suffix}"
@@ -40,7 +42,7 @@ GITHUB_API = "https://api.github.com"
 CLIENT_DIST_DIR = "client-dist"
 USER_AGENT = "blendkit-godot-build"
 RESULT_DIR = "out"
-ARCHIVE_BASE_NAME = "blendkit-godot"
+ARCHIVE_BASE_NAME = "assets2godot"
 PLUGIN_CLIENT_DIR = os.path.join(PLUGIN_SRC_DIR, PLUGIN_DIR, "client")
 
 ARCHIVE_EXCLUDE = []
