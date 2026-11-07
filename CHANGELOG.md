@@ -1,5 +1,45 @@
 # Changelog
 
+## Assets2Godot
+
+This fork continues the Blendkit for Godot lineage under the Assets2Godot
+name. Entries below `0.8.0` are upstream history, kept for reference.
+
+## 0.8.0 - unreleased
+
+First Assets2Godot release: the plugin becomes a multi-source asset
+workspace — local index browser, BlendKit tab and a new Polyhaven
+provider — on top of a forked `bk_client` daemon with provider/index
+endpoints.
+
+### Added
+
+- **Assets2Godot tab**: local index over external asset roots, project
+  files and open-scene resources; grid/list + FileSystem-style split
+  views, search/filter/sort, cached thumbnails; explicit staging import
+  into `res://imported_assets/<asset_name>/`.
+- **Polyhaven tab**: public CC0 catalog via in-plugin HTTP — provider
+  filters/sorts, details popup with preview renders, one-click downloads
+  with `.part` staging and atomic rename.
+- **Quick-download tile**: compact format-picker download surface on
+  provider and BlendKit cards via the shared `remote_*` payload contract.
+- **A2G button**: organization surface entry point (overlay in progress).
+- Context-menu integrations: FileSystem dock ("Scan folder as root") and
+  Scene tree ("Show scene resources").
+- Specs: `docs/specs/architecture.md`, `docs/specs/remote-providers.md`;
+  org-overlay plan in `docs/plans/`.
+
+### Changed
+
+- Plugin identity: name Assets2Godot, author Ingmar Konnow (based on
+  Blendkit for Godot by Jakub Ruzicka & Andreas Gajdosik), version 0.8.0.
+- `dev.py` builds against the `ikonnow/bk_client` fork; release archives
+  are named `assets2godot_vX.Y.Z.zip`.
+- `bk_client` fork release pipeline supports unsigned builds
+  (`SIGNING_ENABLED` repo variable gates signing jobs).
+
+## Upstream history (Blendkit for Godot)
+
 ## 0.7.2 - 2026-10-14
 
 Hotfix for assets not loading under specific circumstances.
