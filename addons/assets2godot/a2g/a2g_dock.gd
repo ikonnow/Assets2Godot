@@ -105,6 +105,12 @@ func _ready() -> void:
 		plugin.connection.connected.connect(_on_connected)
 		plugin.connection.stopped.connect(_on_stopped)
 	_update_state()
+	# The daemon-independent half of the tree exists immediately —
+	# project sections and every in-plugin remote's downloads row.
+	# Deferred so init_gallery has registered the provider panes
+	# first (their _target_dir feeds the row tooltips).
+	_fill_local_sections()
+	_fill_remote_rows.call_deferred()
 
 
 func _head_button(parent: Control, label: String, tip: String) -> Button:
@@ -124,9 +130,10 @@ func _on_connected() -> void:
 func _on_stopped() -> void:
 	_update_state()
 	_tree.clear()
-	# The local sections are client-independent — rebuild them so the
-	# tree never shows empty.
+	# The local sections and in-plugin remote rows are client-independent
+	# — rebuild them so the tree never shows empty.
 	_fill_local_sections()
+	_fill_remote_rows()
 
 
 func _update_state() -> void:
@@ -165,6 +172,10 @@ func _on_item_selected() -> void:
 				root = str(item.get_meta("root"))
 			elif item.has_meta("provider_row_name"):
 				provider = str(item.get_meta("provider_row_name"))
+		# Downloads rows carry their provider key so the browser picks
+		# the right downloads surface.
+		elif mode == &"downloads" and item.has_meta("provider"):
+			provider = str(item.get_meta("provider"))
 	view_mode_selected.emit(mode, provider, root)
 
 
@@ -212,47 +223,159 @@ func _on_refresh() -> void:
 	# Local sections lead the tree — the folded-in "Assets" surface and
 	# the user collections; they exist with or without the Client.
 	_fill_local_sections()
+	# In-plugin remote providers never appear in providers/list — and they
+	# must not: their rows and "Downloaded to project" children exist
+	# whether or not the Client answers (their downloads surface is
+	# client-independent). The daemon's own providers join asynchronously
+	# below; _remote_anchor keeps the PROVIDERS order.
+	_fill_remote_rows()
 	_fetch("providers/list", func(list):
 		if list == null:
 			_status.text = "Client: providers/list failed"
 			_update_state()
 			return
 		_provider_items.clear()
+		# Remote providers first — every remote carries its own
+		# "Downloaded to project" child row mapping to that provider's
+		# downloads surface, daemon-backed and in-plugin alike.
 		for p in list:
-			var item := _tree.create_item(root)
-			item.set_text(0, "%s (%s)" % [p.get("name", "?"), p.get("kind", "?")])
-			item.set_icon(0, _icon("HTTPRequest" if str(p.get("kind", "")) == "remote" else "Folder"))
-			item.set_icon_max_width(0, _icon_size())
-			item.set_meta("provider_row", true)
-			item.set_meta("provider_row_name", str(p.get("name", "")))
-			# BlendKit is remote — its index contribution is the
-			# downloaded-to-project surface, not a browser filter;
-			# the row maps to the same pane as its child below.
-			if str(p.get("name", "")) == "blenderkit":
-				item.set_meta("a2g_view", "downloads")
-			_provider_items[p.get("name", "")] = item
-		# BlendKit's downloaded assets are a project source of their own —
-		# selecting it swaps the browser pane to the gallery's real
-		# downloaded-to-project surface.
-		var dl_parent: TreeItem = _provider_items.get("blenderkit")
-		if dl_parent == null:
-			dl_parent = root
-		var dl := _tree.create_item(dl_parent)
-		dl.set_text(0, "Downloaded to project")
-		var dl_icon := _icon("AssetStore")
-		if dl_icon == null:
-			dl_icon = _icon("AssetLib")
-		if dl_icon != null:
-			dl.set_icon(0, dl_icon)
-			dl.set_icon_max_width(0, _icon_size())
-		dl.set_tooltip_text(0, "Assets downloaded to %s" % plugin.download_dir)
-		dl.set_meta("a2g_view", "downloads")
-		# blenderkit is remote; its endpoints are the client's own /assets/*.
+			if str(p.get("kind", "")) == "remote":
+				var item := _provider_row(p, root)
+				if _remote_anchor != null:
+					item.move_before(_remote_anchor)
+		# Then the local/index providers with their scan roots — they
+		# land after every remote row.
+		for p in list:
+			if str(p.get("kind", "")) != "remote":
+				_provider_row(p, root)
 		for pname in ["fab_vault", "local_dir"]:
 			if _provider_items.has(pname):
 				_fetch("providers/%s/status" % pname, func(st):
 					_fill_status(_provider_items.get(pname), pname, st))
 		_update_state())
+
+
+## The first in-plugin remote row — daemon remote rows insert before it
+## so the tree keeps the PROVIDERS order once providers/list answers.
+var _remote_anchor: TreeItem
+
+
+## Every in-plugin remote provider's row + its "Downloaded to project"
+## child, in PROVIDERS order. Runs synchronously in _on_refresh (root
+## resolved inside, so a deferred call past a _tree.clear() is safe) and
+## once deferred from _ready — the daemon's remote rows move before the
+## first of these via _remote_anchor.
+func _fill_remote_rows() -> void:
+	var root := _tree.get_root()
+	if root == null:
+		return
+	_remote_anchor = null
+	for pd in plugin.PROVIDERS:
+		if bool(pd.get("daemon", false)):
+			continue
+		var item := _remote_row(str(pd.get("key", "")), str(pd.get("title", "")), root)
+		if _remote_anchor == null:
+			_remote_anchor = item
+
+
+## A daemon providers/list entry → its Sources row. Remote providers get
+## their logo, the provider metas every remote row shares (a2g_view +
+## provider key — a remote's index contribution IS the downloaded
+## surface, not a browser filter) and the "Downloaded to project" child.
+func _provider_row(p: Dictionary, root: TreeItem) -> TreeItem:
+	var pname := str(p.get("name", "?"))
+	var remote := str(p.get("kind", "")) == "remote"
+	var key := "blendkit" if pname == "blenderkit" else pname
+	var item := _tree.create_item(root)
+	item.set_text(0, "%s (%s)" % [pname, str(p.get("kind", "?"))])
+	var icon: Texture2D = A2GUI.provider_icon(key) if remote else null
+	if icon == null:
+		icon = _icon("HTTPRequest" if remote else "Folder")
+	if icon != null:
+		item.set_icon(0, icon)
+		item.set_icon_max_width(0, _icon_size())
+	item.set_meta("provider_row", true)
+	item.set_meta("provider_row_name", pname)
+	_provider_items[pname] = item
+	if remote:
+		# blenderkit is remote; its endpoints are the client's own /assets/*.
+		item.set_meta("a2g_view", "downloads")
+		item.set_meta("provider", key)
+		_downloads_row(item, key)
+	return item
+
+
+## An in-plugin provider's Sources row — identical shape to a daemon
+## remote row: logo, downloads mapping, "Downloaded to project" child.
+func _remote_row(key: String, title: String, root: TreeItem) -> TreeItem:
+	var item := _tree.create_item(root)
+	item.set_text(0, "%s (remote)" % title)
+	var icon := A2GUI.provider_icon(key)
+	if icon != null:
+		item.set_icon(0, icon)
+		item.set_icon_max_width(0, _icon_size())
+	item.set_meta("provider_row", true)
+	item.set_meta("provider_row_name", key)
+	item.set_meta("a2g_view", "downloads")
+	item.set_meta("provider", key)
+	_downloads_row(item, key)
+	return item
+
+
+## The "Downloaded to project" child every remote provider row carries —
+## selecting it swaps the browser pane to that provider's downloads
+## surface (a2g_view=downloads + provider key, read by _on_item_selected).
+func _downloads_row(parent: TreeItem, key: String) -> void:
+	var dl := _tree.create_item(parent)
+	dl.set_text(0, "Downloaded to project")
+	var dl_icon := _icon("AssetStore")
+	if dl_icon == null:
+		dl_icon = _icon("AssetLib")
+	if dl_icon != null:
+		dl.set_icon(0, dl_icon)
+		dl.set_icon_max_width(0, _icon_size())
+	dl.set_tooltip_text(0, "Assets downloaded to %s" % _dl_dir_label(key))
+	dl.set_meta("a2g_view", "downloads")
+	dl.set_meta("provider", key)
+
+
+## The display label for a provider's download dir — the resolved target,
+## shortened for the tooltip (BlendKit's configured globalized path, the
+## provider pane's own _target_dir for the in-plugin ones).
+func _dl_dir_label(key: String) -> String:
+	var dir := _dl_dir_for(key)
+	if dir.is_empty():
+		return "?"
+	return A2GUI.short_path(dir)
+
+
+## A provider downloads row's absolute download dir: BlendKit's
+## configured globalized path, else the provider pane's own _target_dir.
+func _dl_dir_for(key: String) -> String:
+	if key.is_empty() or key == "blendkit":
+		return plugin.absolute_download_path
+	var pane: Control = plugin.provider_pane(key)
+	if pane != null and pane.has_method("_target_dir"):
+		return str(pane.call("_target_dir"))
+	return ""
+
+
+## The selected row's downloads-provider key ("" = BlendKit's row, kept
+## for callers that never set the meta).
+func _selected_dl_key() -> String:
+	var item := _tree.get_selected()
+	if item != null and item.has_meta("provider"):
+		return str(item.get_meta("provider"))
+	return ""
+
+
+## The provider's display title for menu labels — the registry's own
+## spelling, so a "Open in <Provider> tab" item always names the tab.
+func _dl_title_for(key: String) -> String:
+	for p in plugin.PROVIDERS:
+		if str(p.get("key", "")) == key:
+			return str(p.get("title", key))
+	return "BlendKit" if key.is_empty() else key.capitalize()
 
 
 ## The client-independent top section: project files and the open
@@ -420,9 +543,15 @@ func _on_tree_rmb(pos: Vector2, button: int) -> void:
 		menu.add_icon_item(_icon("Play"), "Scan " + str(sel["provider"]), DockMenu.SCAN_PROVIDER)
 	elif _tree.get_selected() != null and _tree.get_selected().has_meta("a2g_view") \
 			and _tree.get_selected().get_meta("a2g_view") == "downloads":
-		menu.add_icon_item(_icon("ShowInFileSystem"), "Show in FileSystem", DockMenu.DL_SHOW_FS)
-		menu.add_icon_item(_icon("Folder"), "Show in File Manager", DockMenu.DL_SHOW_FM)
-		menu.add_icon_item(_icon("AssetStore"), "Open in BlendKit tab", DockMenu.DL_OPEN_BK)
+		var key := str(_tree.get_selected().get_meta("provider", ""))
+		var dir := _dl_dir_for(key)
+		# The FileSystem dock only navigates inside res:// — external
+		# download targets get the File Manager action alone.
+		if not dir.is_empty() and ProjectSettings.localize_path(dir).begins_with("res://"):
+			menu.add_icon_item(_icon("ShowInFileSystem"), "Show in FileSystem", DockMenu.DL_SHOW_FS)
+		if not dir.is_empty():
+			menu.add_icon_item(_icon("Folder"), "Show in File Manager", DockMenu.DL_SHOW_FM)
+		menu.add_icon_item(_icon("AssetStore"), "Open in %s tab" % _dl_title_for(key), DockMenu.DL_OPEN_BK)
 	elif _tree.get_selected() != null and _tree.get_selected().has_meta("provider_row") \
 			and _tree.get_selected().get_meta("provider_row") == true:
 		var pname: String = _tree.get_selected().get_meta("provider_row_name", "")
@@ -478,14 +607,21 @@ func _on_dock_menu(id: int) -> void:
 		DockMenu.ADD_FOLDER:
 			_on_add()
 		DockMenu.DL_SHOW_FS:
-			EditorInterface.get_file_system_dock().navigate_to_path(plugin.download_dir)
+			var res_dir := ProjectSettings.localize_path(_dl_dir_for(_selected_dl_key()))
+			if res_dir.begins_with("res://"):
+				EditorInterface.get_file_system_dock().navigate_to_path(res_dir)
 		DockMenu.DL_SHOW_FM:
-			OS.shell_show_in_file_manager(plugin.absolute_download_path)
+			var dir := _dl_dir_for(_selected_dl_key())
+			if not dir.is_empty():
+				OS.shell_show_in_file_manager(dir)
 		DockMenu.DL_OPEN_BK:
-			var g: Control = plugin.gallery
-			if g != null:
-				plugin.select_provider(g)
-				g.project_toggle.button_pressed = true
+			var key := _selected_dl_key()
+			var pane: Control = plugin.gallery if key.is_empty() or key == "blendkit" \
+				else plugin.provider_pane(key)
+			if pane != null:
+				plugin.select_provider(pane)
+				if key.is_empty() or key == "blendkit":
+					pane.project_toggle.button_pressed = true
 
 
 func _on_add() -> void:

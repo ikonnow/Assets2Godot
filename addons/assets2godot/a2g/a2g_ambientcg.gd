@@ -21,6 +21,9 @@ const Conversions = preload("res://addons/assets2godot/conversions.gd")
 const AcgMenuButton = preload("res://addons/assets2godot/a2g/a2g_acg_menu_button.gd")
 const AcgDetails = preload("res://addons/assets2godot/a2g/a2g_acg_details.gd")
 
+## This provider's key in the plugin's PROVIDERS registry — tab switch,
+## Sources row and downloads surface all share it.
+const PROVIDER_KEY := "ambientcg"
 ## Editor setting holding the absolute download target dir. "" = auto:
 ## a local_dir root named like *ambientcg*, else res://Assets2Godot/ambientcg.
 const SETTING_DIR := "assets2godot/ambientcg_dir"
@@ -88,6 +91,12 @@ var _dl_dest := ""
 var _dl_req: HTTPRequest
 var _dl_done := {}
 var _dl_zips: Array = []
+## Cards outside _cards that still want their slug's thumbnail — the A2G
+## downloads surface's tiles, kept weak-ish by pruning in _push_thumb.
+var _thumb_watchers := {}
+## Synthesized asset dicts for downloaded slugs the catalog doesn't list —
+## keeps details/state working for disk-only downloads.
+var _dl_extra_assets := {}
 var _converting := false
 var _updating_theme := false
 
@@ -279,6 +288,10 @@ func _update_theme() -> void:
 ## Refetch the whole catalog — the menu's "Reload catalog" and the
 ## offline-state Retry both run through here.
 func reload_catalog() -> void:
+	# Provider switched off in the A2G menu — no catalog fetch while its
+	# tab stays hidden; re-enabling reloads on first show.
+	if plugin != null and not plugin.provider_enabled(PROVIDER_KEY):
+		return
 	_cache.clear()
 	_cats.clear()
 	_cats_fetched = false
@@ -301,6 +314,8 @@ func _set_catalog_state(s: int) -> void:
 func _fetch_url(url: String, cb: Callable, track_state := false) -> void:
 	var req := HTTPRequest.new()
 	req.timeout = 60.0
+	# Off the main thread — catalog pages run to ~6MB of JSON each.
+	req.use_threads = true
 	add_child(req)
 	req.request_completed.connect(func(_result, code, _h, body):
 		req.queue_free()
@@ -338,6 +353,8 @@ func _fetch_categories() -> void:
 
 
 func _reload() -> void:
+	if plugin != null and not plugin.provider_enabled(PROVIDER_KEY):
+		return
 	_refill_categories()
 	var key := _facet_key()
 	if _cache.has(key):
@@ -355,9 +372,12 @@ func _reload() -> void:
 
 ## A catalog page arrived: page 0 reveals totalResults, so it also fires
 ## the remaining offsets in parallel — every page merges deduped assets
-## into the facet bucket until the count is exhausted. Pages render as
-## they land (the API answers each in seconds): the grid fills live and
-## the final pass below still does the authoritative rebuild.
+## into the facet bucket until the count is exhausted. The grid paints
+## once on first content (cards + thumbs go live while pages still
+## merge); intermediate pages only refresh the status line, the last
+## page does the authoritative rebuild — a per-page rebuild frees and
+## recreates up to 500 GalleryItems and resets the thumb queue each
+## time.
 func _on_catalog_page(key: String, offset: int, text: String) -> void:
 	var st: Dictionary = _pages.get(key, {})
 	if st.is_empty():
@@ -381,18 +401,21 @@ func _on_catalog_page(key: String, offset: int, text: String) -> void:
 		seen[slug] = true
 		st["assets"].append(a)
 	if key == _facet_key() and not st["assets"].is_empty():
-		_assets = st["assets"]
-		AcgApi.sort_assets(_assets, str(_sort_btn.get_selected_metadata()) \
-			if _sort_btn.selected >= 0 else "popular")
-		_rebuild()
+		if _assets.is_empty():
+			# First content: paint once. A per-page rebuild was the thumb
+			# stall — 500 freed+recreated GalleryItems and a cleared thumb
+			# queue on every one of the ~7 pages.
+			_assets = st["assets"]
+			_finish_load()
+		elif int(st["left"]) > 1:
+			_status.text = "Loading… %d / %d" % [st["assets"].size(),
+				int(st.get("total", _assets.size()))]
 	if offset == 0:
-		var total := AcgApi.parse_total(raw)
-		var extra := 0
-		for off in range(AcgApi.PAGE_SIZE, total, AcgApi.PAGE_SIZE):
-			extra += 1
+		st["total"] = AcgApi.parse_total(raw)
+		for off in range(AcgApi.PAGE_SIZE, int(st["total"]), AcgApi.PAGE_SIZE):
+			st["left"] += 1
 			_fetch_url(AcgApi.assets_url(st_type, st_cat, off),
 				func(t): _on_catalog_page(key, off, t), true)
-		st["left"] += extra
 	st["left"] -= 1
 	if int(st["left"]) <= 0:
 		_pages.erase(key)
@@ -452,22 +475,13 @@ func _rebuild() -> void:
 		if shown >= PAGE_MAX:
 			continue
 		shown += 1
-		# The chip mirrors BK's plan badge: the honest equivalent for an
-		# all-CC0 catalog is the license itself (type stays on filter/icon).
-		var card: Control = A2GUI.asset_card(str(a.get("name", "?")), "CC0",
-			"ambientcg", "", null, str(AcgApi.TYPE_ICONS.get(a.get("type", ""), "ImageTexture")),
-			{"remote_slug": slug, "remote_title": str(a.get("name", slug)),
-				"remote_url": AcgApi.web_url(slug),
-				"remote_site": "ambientcg.com",
-				"remote_options": Callable(self, "_remote_options_for").bind(slug),
-				"remote_download": Callable(self, "_remote_download").bind(slug),
-				"remote_state": Callable(self, "_remote_state").bind(slug),
-				"remote_dir": Callable(self, "_downloaded_dir").bind(slug),
-				"remote_details": Callable(self, "_show_details").bind(slug)})
-		card.connect("selected", func(_asset): _show_details(slug))
+		var card := _make_card(a, downloaded.has(slug))
 		_grid.add_child(card)
+		# Register BEFORE queueing the thumb: a cached hit inside
+		# _queue_thumb pushes synchronously through _cards — it must find
+		# this card or the texture is dropped (thumbs fetched during the
+		# catalog load hit exactly this on the finish rebuild).
 		_cards[slug] = card
-		card.call("set_downloaded", downloaded.has(slug))
 		_queue_thumb(a)
 	_empty.visible = matched == 0
 	if matched == 0:
@@ -495,19 +509,86 @@ func _rebuild() -> void:
 	_fetch_roots()
 
 
-## Slugs of downloaded assets: this session's finished downloads plus any
-## asset folder already under the download target (<target>/<type>/<slug>) —
-## the toggle's "downloaded" view, mirroring BlendKit's project view.
+## One catalog/downloaded asset → the shared card: remote_* payload and
+## downloaded badge — the exact tile _rebuild lists and the A2G downloads
+## surface borrows via make_download_card(). The caller queues the thumb
+## AFTER registering the card (_cards resp. _thumb_watchers).
+func _make_card(a: Dictionary, is_downloaded := false) -> Control:
+	var slug := str(a.get("slug", ""))
+	# The chip mirrors BK's plan badge: the honest equivalent for an
+	# all-CC0 catalog is the license itself (type stays on filter/icon).
+	var card: Control = A2GUI.asset_card(str(a.get("name", "?")), "CC0",
+		"ambientcg", "", null, str(AcgApi.TYPE_ICONS.get(a.get("type", ""), "ImageTexture")),
+		{"remote_slug": slug, "remote_title": str(a.get("name", slug)),
+			"remote_url": AcgApi.web_url(slug),
+			"remote_site": "ambientcg.com",
+			"remote_options": Callable(self, "_remote_options_for").bind(slug),
+			"remote_download": Callable(self, "_remote_download").bind(slug),
+			"remote_state": Callable(self, "_remote_state").bind(slug),
+			"remote_dir": Callable(self, "_downloaded_dir").bind(slug),
+			"remote_details": Callable(self, "_show_details").bind(slug)})
+	card.connect("selected", func(_asset): _show_details(slug))
+	card.call("set_downloaded", is_downloaded)
+	return card
+
+
+## The downloads surface's data: every downloaded slug → its asset dict.
+## Slugs on disk the catalog doesn't list still get a synthesized entry
+## (name + type from the folder) so reveal/state/quick-tile work.
+func downloaded_assets() -> Array:
+	var out := []
+	var slugs := _downloaded_slugs()
+	for slug in slugs:
+		var a := _asset_by_slug(slug)
+		out.append(a if not a.is_empty() else _synth_asset(slug, str(slugs[slug])))
+	return out
+
+
+## The exact card this tab's grid would show for [param a], for the A2G
+## downloads surface — same tile by construction, thumb delivered
+## through _thumb_watchers since the card never joins _cards.
+func make_download_card(a: Dictionary) -> Control:
+	var card := _make_card(a, true)
+	var slug := str(a.get("slug", ""))
+	if str(a.get("thumbnail_url", "")).is_empty():
+		return card
+	# Watch BEFORE queueing: a cached hit inside _queue_thumb pushes
+	# synchronously — it must find this card among the watchers.
+	_thumb_watchers.get_or_add(slug, []).append(card)
+	_queue_thumb(a)
+	return card
+
+
+## Slugs of downloaded assets → their type dir: this session's finished
+## downloads plus any asset folder under the download target
+## (<target>/<type>/<slug>) — the toggle's "downloaded" view, mirroring
+## BlendKit's project view. The type dir rides along so disk-only slugs
+## synthesize a correct asset type and _dl_state_for finds the real path.
 func _downloaded_slugs() -> Dictionary:
 	var slugs := {}
 	for slug in _dl_done:
-		slugs[slug] = true
+		slugs[slug] = str(_dl_done[slug]).get_base_dir().get_file()
 	var base := _target_dir()
 	if DirAccess.dir_exists_absolute(base):
 		for type_dir in DirAccess.get_directories_at(base):
 			for d in DirAccess.get_directories_at(base.path_join(type_dir)):
-				slugs[d] = true
+				slugs[d] = type_dir
 	return slugs
+
+
+## A disk-only slug → a minimal catalog-shaped dict: type inferred from
+## its parent folder (TYPE_DIRS reversed), name from the slug. Cached in
+## _dl_extra_assets so _asset_by_slug answers it too.
+func _synth_asset(slug: String, type_dir: String) -> Dictionary:
+	if _dl_extra_assets.has(slug):
+		return _dl_extra_assets[slug]
+	var rev := {}
+	for t in AcgApi.TYPE_DIRS:
+		rev[AcgApi.TYPE_DIRS[t]] = t
+	var a := {"slug": slug, "name": slug.replace("-", " ").replace("_", " ").capitalize(),
+		"type": str(rev.get(type_dir, ""))}
+	_dl_extra_assets[slug] = a
+	return a
 
 
 func _update_dl_badge() -> void:
@@ -519,11 +600,14 @@ func _update_dl_badge() -> void:
 		_dl_toggle.tooltip_text += "\n%d %s in progress" % [count, "download" if count == 1 else "downloads"]
 
 
+## Catalog lookup with the disk-only fallback: a slug the catalog doesn't
+## list but that exists under the target still answers its synthesized
+## dict, so details/state/reveal work for every downloaded asset.
 func _asset_by_slug(slug: String) -> Dictionary:
 	for a in _assets:
 		if str(a.get("slug", "")) == slug:
 			return a
-	return {}
+	return _dl_extra_assets.get(slug, {})
 
 
 # MARK: thumbnails
@@ -534,22 +618,47 @@ func _queue_thumb(asset: Dictionary) -> void:
 		return
 	var slug := str(asset.get("slug", ""))
 	if _thumb_cache.has(url):
-		var card: Control = _cards.get(slug)
-		if is_instance_valid(card):
-			card.call("set_thumb_texture", _thumb_cache[url], false)
+		_push_thumb(slug, _thumb_cache[url])
 		return
 	_thumb_queue.append(asset)
 	_pump_thumbs()
+
+
+## Delivers a finished thumbnail to the grid card AND every watcher card
+## (the A2G downloads surface's tiles) — pruning freed watchers so the
+## map never holds dead refs. ambientCG thumbs never use the HDR fill.
+func _push_thumb(slug: String, tex: Texture2D) -> void:
+	var card: Control = _cards.get(slug)
+	if is_instance_valid(card):
+		card.call("set_thumb_texture", tex, false)
+	if not _thumb_watchers.has(slug):
+		return
+	var alive := []
+	for c: Control in _thumb_watchers[slug]:
+		if is_instance_valid(c):
+			c.call("set_thumb_texture", tex, false)
+			alive.append(c)
+	if alive.is_empty():
+		_thumb_watchers.erase(slug)
+	else:
+		_thumb_watchers[slug] = alive
 
 
 func _pump_thumbs() -> void:
 	while _thumb_active < THUMB_PARALLEL and not _thumb_queue.is_empty():
 		var a: Dictionary = _thumb_queue.pop_front()
 		var url := str(a.get("thumbnail_url", ""))
+		# Dropped since it was queued — a rebuild refills the queue while
+		# fetches are in flight; without this every sort/filter refetches.
+		if url.is_empty() or _thumb_cache.has(url):
+			continue
 		var slug := str(a.get("slug", ""))
 		_thumb_active += 1
 		var req := HTTPRequest.new()
 		req.timeout = 15.0
+		# Transfers off the main thread — without it the pump competes
+		# with the 500-card rebuild for frame time.
+		req.use_threads = true
 		add_child(req)
 		req.request_completed.connect(func(_r, code, _h, body):
 			req.queue_free()
@@ -564,9 +673,7 @@ func _pump_thumbs() -> void:
 				if err == OK:
 					var tex := ImageTexture.create_from_image(img)
 					_thumb_cache[url] = tex
-					var card: Control = _cards.get(slug)
-					if is_instance_valid(card):
-						card.call("set_thumb_texture", tex, false)
+					_push_thumb(slug, tex)
 			_pump_thumbs())
 		if req.request(url, [AcgApi.UA_HEADER]) != OK:
 			req.queue_free()
@@ -593,14 +700,17 @@ func _show_details(slug: String) -> void:
 
 ## The state the popup's action button needs: downloaded folder when the
 ## asset's dir exists under the target, downloading while its queue runs.
+## The real type dir comes from the disk scan — a slug the catalog
+## doesn't list resolves just as correctly as a fresh download does.
 func _dl_state_for(slug: String) -> Dictionary:
 	var dir := str(_dl_done.get(slug, ""))
 	if dir.is_empty():
-		var a := _asset_by_slug(slug)
-		var d := _target_dir().path_join(str(AcgApi.TYPE_DIRS.get(a.get("type", ""), "misc"))) \
-			.path_join(slug.validate_filename())
-		if DirAccess.dir_exists_absolute(d):
-			dir = d
+		var slugs := _downloaded_slugs()
+		# Disk folders carry the validate_filename()d slug — try both.
+		for s in [slug, slug.validate_filename()]:
+			if slugs.has(s):
+				dir = _target_dir().path_join(str(slugs[s])).path_join(s)
+				break
 	return {"dir": dir,
 		"downloading": (_dl_req != null or _converting) \
 			and str(_dl_asset.get("slug", "")) == slug}
@@ -697,6 +807,7 @@ func _dl_next() -> void:
 func _dl_send(url: String, dest: String, redirs: int) -> void:
 	_dl_req = HTTPRequest.new()
 	_dl_req.timeout = 300.0
+	_dl_req.use_threads = true
 	_dl_req.download_file = dest + ".part"
 	add_child(_dl_req)
 	_dl_req.request_completed.connect(func(result, code, headers, _b):
