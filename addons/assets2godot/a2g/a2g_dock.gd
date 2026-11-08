@@ -8,7 +8,7 @@ const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
 signal scanned
 ## Which content the browser pane should show — "downloads" when the
 ## "Downloaded to project" row is selected, "browser" for anything else.
-signal view_mode_selected(mode: StringName)
+signal view_mode_selected(mode: StringName, provider: String, root: String)
 ## The Assets2Godot dock: lists the Client's providers, their configured scan
 ## roots and index search. Directories are only ever scanned when the user
 ## adds them here — everything goes through the Client's /providers/*
@@ -150,11 +150,22 @@ func _on_item_selected() -> void:
 	_update_state()
 	var item := _tree.get_selected()
 	var mode := &"browser"
-	if item != null and item.has_meta("a2g_view"):
-		var v := str(item.get_meta("a2g_view"))
-		if not v.is_empty():
-			mode = StringName(v)
-	view_mode_selected.emit(mode)
+	var provider := ""
+	var root := ""
+	if item != null:
+		if item.has_meta("a2g_view"):
+			var v := str(item.get_meta("a2g_view"))
+			if not v.is_empty():
+				mode = StringName(v)
+		# Browser-mode rows narrow the file view: root rows filter by
+		# their scan root, provider rows by the provider itself.
+		if mode == &"browser":
+			if item.has_meta("provider") and item.has_meta("root"):
+				provider = str(item.get_meta("provider"))
+				root = str(item.get_meta("root"))
+			elif item.has_meta("provider_row_name"):
+				provider = str(item.get_meta("provider_row_name"))
+	view_mode_selected.emit(mode, provider, root)
 
 
 ## The selected tree row's {"provider","root"} metadata, or null when the
@@ -214,6 +225,11 @@ func _on_refresh() -> void:
 			item.set_icon_max_width(0, _icon_size())
 			item.set_meta("provider_row", true)
 			item.set_meta("provider_row_name", str(p.get("name", "")))
+			# BlendKit is remote — its index contribution is the
+			# downloaded-to-project surface, not a browser filter;
+			# the row maps to the same pane as its child below.
+			if str(p.get("name", "")) == "blenderkit":
+				item.set_meta("a2g_view", "downloads")
 			_provider_items[p.get("name", "")] = item
 		# BlendKit's downloaded assets are a project source of their own —
 		# selecting it swaps the browser pane to the gallery's real

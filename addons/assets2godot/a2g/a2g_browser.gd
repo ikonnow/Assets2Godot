@@ -91,6 +91,9 @@ var _dl_fit_queued := false
 ## when a Sources "Project" row selects view mode "project"/"scene".
 var _sa_view: PanelContainer
 var _sa_mode := &""
+## A Sources-tree row's filter wish {provider, root} — applied to the
+## provider dropdown once _refill_provider has an item carrying it.
+var _wanted_source := {}
 ## The single detail popup every tile click raises — one instance,
 ## re-shown like the provider tabs' asset_details.
 var _details: AcceptDialog
@@ -133,7 +136,9 @@ func _ready() -> void:
 	host.add_child(_search)
 	_provider_filter = OptionButton.new()
 	_provider_filter.tooltip_text = "Filter by provider."
-	_provider_filter.item_selected.connect(func(_i): _rebuild())
+	# A manual pick drops a Sources row's pending filter wish — the user
+	# overrode what the tree wanted.
+	_provider_filter.item_selected.connect(func(_i): _wanted_source = {}; _rebuild())
 	host.add_child(_provider_filter)
 	_kind_filter = OptionButton.new()
 	_kind_filter.tooltip_text = "Filter by asset kind."
@@ -248,6 +253,9 @@ func _ready() -> void:
 	_sa_view = A2GSceneAssets.new()
 	_sa_view.plugin = plugin
 	_sa_view.visible = false
+	# Like _dl_scroll above: without expand the embedded panel keeps only
+	# its minimum height and clips the card grid to a strip.
+	_sa_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(_sa_view)
 
 	_details = A2GDetails.new()
@@ -259,6 +267,7 @@ func _ready() -> void:
 	_icon = Icons.render_svg(A2GUI.ICON_PATH, EditorInterface.get_editor_scale(), true)
 	_thumbs = A2GThumbs.new()
 	_thumbs.rendered.connect(_on_rendered)
+	_thumbs.failed.connect(_on_thumbs_failed)
 	add_child(_thumbs)
 	if plugin.connection:
 		plugin.connection.connected.connect(_reload)
@@ -302,7 +311,12 @@ func _on_dl_browse() -> void:
 ## Sources-tree driven pane swap: the indexed browser vs the downloaded
 ## assets surface. The index toolbar controls belong to the browser and
 ## hide with it, like upstream's filter row in project mode.
-func show_view_mode(mode: StringName) -> void:
+func show_view_mode(mode: StringName, provider := "", root := "") -> void:
+	# A Sources row narrows the browser: provider/root go through the
+	# same dropdown filter a manual pick would set.
+	if mode == &"browser":
+		_wanted_source = {"provider": provider, "root": root}
+		_apply_source_filter()
 	_dl_active = mode == &"downloads" and _dl_scroll != null
 	_sa_mode = mode if mode in [&"project", &"scene"] and _sa_view != null else &""
 	if _dl_scroll != null:
@@ -319,6 +333,29 @@ func show_view_mode(mode: StringName) -> void:
 	if _dl_active and _dl_view.get("project") != null:
 		_dl_view.refresh_if_shown()
 		_queue_dl_fit()
+
+
+## Selects the provider dropdown item matching _wanted_source — the
+## tree row and the manual pick are the same filter by construction.
+## Returns false while the dropdown can't express it (provider not in
+## the result set yet); _refill_provider retries on every refill.
+func _apply_source_filter() -> bool:
+	if _wanted_source.is_empty():
+		return false
+	var want_root := str(_wanted_source.get("root", "")).replace("\\", "/").trim_suffix("/")
+	for i in _provider_filter.item_count:
+		var md: Variant = _provider_filter.get_item_metadata(i)
+		if not md is Dictionary:
+			continue
+		var item_root := str(md.get("root", "")).replace("\\", "/").trim_suffix("/")
+		if str(md.get("provider", "")) == str(_wanted_source.get("provider", "")) \
+				and item_root == want_root:
+			_wanted_source = {}
+			if _provider_filter.selected != i:
+				_provider_filter.select(i)
+				_rebuild()
+			return true
+	return false
 
 
 func _update_toolbar_visibility() -> void:
@@ -708,12 +745,15 @@ func _is_image(path: String) -> bool:
 	return path.get_extension().to_lower() in A2GThumbs.IMAGE_EXTS
 
 
-## Files under res:// get the editor's own previews — the same textures the
-## FileSystem dock's tiles show. External files route by kind (verified in
-## docs/research/thumbnail_generation.md): .tres/.res resolve through the
-## previewer too (native preview + the editor's own resthumb disk cache),
-## audio loads into a stream for the edited-preview waveform, and the rest
-## goes through the A2G renderer. Payload is {idx, path} of the list item.
+## Renderable types go through the A2G rig first: it produces the same
+## preview as the native generators but at card size — the native queue
+## is fixed at 64px and looks soft on the grid. Only when the rig finds
+## nothing renderable (failed signal) does the native queue take over,
+## for res:// and external .tres/.res alike. Audio keeps the native
+## edited-preview waveform (no renderer of our own). Payload is
+## {idx, path} of the list item.
+const STAGED_EXTS := ["tres", "res", "tscn", "scn", "glb", "gltf", "fbx"]
+
 func _queue_preview(path: String, payload: Dictionary) -> void:
 	# A claimed sibling preview image wins over any generated thumbnail —
 	# it is the asset pack's intended presentation.
@@ -729,25 +769,24 @@ func _queue_preview(path: String, payload: Dictionary) -> void:
 		var proj := ProjectSettings.globalize_path("res://")
 		if path.begins_with(proj):
 			res_path = "res://" + path.substr(proj.length())
-	if res_path != "":
-		var previewer := EditorInterface.get_resource_previewer()
-		if previewer != null:
-			previewer.queue_resource_preview(res_path, self, "_on_preview", payload)
-		return
 	var previewer := EditorInterface.get_resource_previewer()
 	var ext := path.get_extension().to_lower()
-	if previewer != null:
-		if ext in ["tres", "res"]:
-			# Verified working on absolute paths — falls back to A2GThumbs
-			# when the generator can't produce one (e.g. PackedScene .tres).
-			payload["fallback"] = true
-			previewer.queue_resource_preview(path, self, "_on_preview", payload)
-			return
-		if ext in ["wav", "mp3", "ogg"]:
+	if ext in ["wav", "mp3", "ogg"]:
+		if previewer != null:
 			var stream := _load_audio(ext, path)
 			if stream != null:
 				previewer.queue_edited_resource_preview(stream, self, "_on_preview", payload)
 				return
+	elif ext in STAGED_EXTS and _thumbs != null:
+		# fallback carries the native-loadable path (res:// for project
+		# files, abs for external .tres/.res) — _on_thumbs_failed uses it.
+		payload["fallback"] = res_path if res_path != "" else ext in ["tres", "res"]
+		_thumbs.request(payload, path)
+		return
+	elif res_path != "":
+		if previewer != null:
+			previewer.queue_resource_preview(res_path, self, "_on_preview", payload)
+		return
 	if _thumbs != null:
 		_thumbs.request(payload, path)
 
@@ -764,6 +803,24 @@ func _load_audio(ext: String, path: String) -> AudioStream:
 ## stale payloads from before a rebuild: index bounds + path must match.
 func _on_rendered(payload, texture: Texture2D) -> void:
 	_set_item_thumb(payload, texture)
+
+
+## The rig found nothing renderable — fall back to the native queue for
+## the paths it can actually reach (res://, external .tres/.res).
+func _on_thumbs_failed(payload, path: String) -> void:
+	if not (payload is Dictionary):
+		return
+	var fb: Variant = payload.get("fallback")
+	if fb == null or fb == false:
+		return
+	payload.erase("fallback")
+	var previewer := EditorInterface.get_resource_previewer()
+	if previewer == null:
+		return
+	if fb is String:
+		previewer.queue_resource_preview(fb, self, "_on_preview", payload)
+	elif path.get_extension().to_lower() in ["tres", "res"]:
+		previewer.queue_resource_preview(path, self, "_on_preview", payload)
 
 
 func _on_preview(_path: String, preview: Texture2D, thumbnail_preview: Texture2D, payload) -> void:
@@ -823,6 +880,9 @@ func _refill_provider() -> void:
 			_provider_filter.set_item_tooltip(j, r)
 			if prev is Dictionary and prev.get("provider") == p and str(prev.get("root", "")) == r:
 				_provider_filter.selected = j
+	# A Sources row's filter wish pending since before this refill —
+	# now the items exist to carry it.
+	_apply_source_filter()
 
 
 ## Sort handlers — the dock sorts the file list itself; the search result
