@@ -78,6 +78,7 @@ static func short_path(path: String, max_len := 56) -> String:
 	return p.left(keep) + "…" + p.right(keep)
 
 
+const Icons = preload("res://addons/assets2godot/ui/icons.gd")
 const GALLERY_ITEM := preload("res://addons/assets2godot/ui/gallery/gallery_item.tscn")
 const GalleryItemScript = preload("res://addons/assets2godot/ui/gallery/gallery_item.gd")
 const BlenderImport = preload("res://addons/assets2godot/blender_import.gd")
@@ -539,3 +540,24 @@ static func make_grid() -> GridContainer:
 	grid.add_theme_constant_override("h_separation", gap)
 	grid.add_theme_constant_override("v_separation", gap)
 	return grid
+
+
+## MARK: provider marks — the same logo files the provider menus use,
+## shared by the tab strip, the Sources tree and the settings menu so a
+## provider reads identically on every surface. `vb` is the SVG viewBox
+## side, `mono` requests the editor-icon recolor (light on dark themes);
+## colored marks (Polyhaven) keep their paint like their menu logo does.
+const PROVIDER_LOGOS := {
+	"blendkit": {"path": "res://addons/assets2godot/logo/blendkit-logo-hexa_pure.svg", "vb": 320.0, "mono": false},
+	"polyhaven": {"path": "res://addons/assets2godot/logo/polyhaven-icon.svg", "vb": 1250.0, "mono": false},
+	"ambientcg": {"path": "res://addons/assets2godot/logo/ambientcg-icon.svg", "vb": 4096.0, "mono": true},
+}
+
+
+## The provider's [param px]-pixel mark, or null for an unknown key.
+static func provider_icon(key: String, px := 16.0) -> Texture2D:
+	var info: Dictionary = PROVIDER_LOGOS.get(key, {})
+	if info.is_empty():
+		return null
+	return Icons.render_svg(str(info["path"]),
+		px * EditorInterface.get_editor_scale() / float(info["vb"]), bool(info["mono"]))
