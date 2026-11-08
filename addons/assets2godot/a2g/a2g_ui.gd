@@ -521,9 +521,14 @@ static func style_tabbar(bar: TabBar) -> void:
 			"font_hovered_color", "font_disabled_color", "font_outline_color"]:
 		var col := base.get_theme_color(name, "TabContainer")
 		bar.add_theme_color_override(name, col)
-	for name in ["h_separation", "icon_max_width", "outline_size"]:
-		bar.add_theme_constant_override(name,
-			base.get_theme_constant(name, "TabContainer"))
+	# Constants: hseparation is the icon↔text gap (the name is literally
+	# "hseparation" — a missing constant would silently become a 0
+	# override, so only copy what the theme really defines).
+	for name in ["hseparation", "side_margin", "tab_separation",
+			"icon_max_width", "outline_size"]:
+		if base.has_theme_constant(name, "TabContainer"):
+			bar.add_theme_constant_override(name,
+				base.get_theme_constant(name, "TabContainer"))
 	var font := base.get_theme_font("font", "TabContainer")
 	if font != null:
 		bar.add_theme_font_override("font", font)
