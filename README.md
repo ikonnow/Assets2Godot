@@ -27,10 +27,17 @@ browser and staging ground for multiple sources at once:
   is copied into `res://` until you explicitly import an asset, which stages
   it into `res://imported_assets/<asset_name>/`.
 - **BlendKit tab** — the full upstream Blendkit for Godot experience:
-  search, filters, plans/login, downloads into `bk_assets/`.
+  search, filters, plans/login, downloads into `Assets2Godot/bk_assets/`.
 - **Polyhaven tab** — the public CC0 catalog (models, textures, HDRIs,
   fonts) via Poly Haven's API, implemented in pure GDScript — no account,
   no helper daemon needed.
+- **ambientCG tab** — Ambient CG's CC0 library (materials, 3D models,
+  HDRIs, brushes/decals, atlases) as complete ZIP sets, likewise pure
+  GDScript.
+
+All provider downloads land under `res://Assets2Godot/<provider>/` —
+one shared parent next to your project files, gitignored — with
+BlendKit's own root living there too as `Assets2Godot/bk_assets/`.
 - **A2G button** — an organization surface over the provider tabs:
   collections, favorites, batch operations (planned, see
   [Roadmap](#roadmap)).
@@ -113,7 +120,7 @@ Open the **Assets2Godot** workspace in the editor's top bar (next to
 
 The upstream Blendkit experience: search blendkit.com inside the editor,
 filter by type/category/polygons/license, log in optionally (free assets
-need no account), download into `bk_assets/` organized by type and asset.
+need no account), download into `Assets2Godot/bk_assets/` organized by type and asset.
 Settings cover download directory, **Model Format** (`.blend` vs glTF),
 resolution, UUID naming, Client port and log level — see the in-plugin
 **User Guide** link for the full reference.

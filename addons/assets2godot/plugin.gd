@@ -99,7 +99,8 @@ func log_trace(msg: String) -> void:
 
 
 var client_enabled := true
-var download_dir: String = "res://bk_assets/"
+# a2g: upstream default "res://bk_assets/" — providers share one parent.
+var download_dir: String = "res://Assets2Godot/bk_assets/"
 var absolute_download_path: String
 var model_format: String = "blend"
 var resolution: String = ""
