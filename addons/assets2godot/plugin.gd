@@ -41,6 +41,7 @@ const A2GDock = preload("res://addons/assets2godot/a2g/a2g_dock.gd")
 const A2GBrowser = preload("res://addons/assets2godot/a2g/a2g_browser.gd")
 const A2GContextPlugin = preload("res://addons/assets2godot/a2g/a2g_context_plugin.gd")
 const A2GPolyhaven = preload("res://addons/assets2godot/a2g/a2g_polyhaven.gd")
+const A2GAmbientcg = preload("res://addons/assets2godot/a2g/a2g_ambientcg.gd")
 const Auth = preload("res://addons/assets2godot/auth.gd")
 const BlenderImport = preload("res://addons/assets2godot/blender_import.gd")
 const ClientBinary = preload("res://addons/assets2godot/client_binary.gd")
@@ -311,6 +312,12 @@ func init_gallery() -> void:
 	polyhaven.plugin = self
 	polyhaven.name = "Polyhaven"
 	_add_tab_pane(panes, polyhaven)
+	# ambientCG: second pure-GDScript provider — public v3 API, all-CC0
+	# catalog, downloads are extracted zip archives.
+	var ambientcg := A2GAmbientcg.new()
+	ambientcg.plugin = self
+	ambientcg.name = "ambientCG"
+	_add_tab_pane(panes, ambientcg)
 	main_screen.hide()
 	EditorInterface.get_editor_main_screen().add_child(main_screen)
 	# Provider tabs stay text-only — icon noise in the tab row was
