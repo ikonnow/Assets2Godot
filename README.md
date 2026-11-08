@@ -13,6 +13,10 @@
       <img src="https://img.shields.io/github/license/ikonnow/Assets2Godot?color=orange" alt="GPLv2">
     </a>
   </p>
+  <p>
+    <img src="img/Assets2Godot_ambientCG.png" width="844"
+      alt="Assets2Godot ambientCG tab — provider tabs, filter row and CC0 asset cards in the Godot editor">
+  </p>
 </div>
 
 ---
