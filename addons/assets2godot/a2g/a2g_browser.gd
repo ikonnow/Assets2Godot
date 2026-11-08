@@ -9,6 +9,7 @@ const Icons = preload("res://addons/assets2godot/ui/icons.gd")
 const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
 const A2GThumbs = preload("res://addons/assets2godot/a2g/a2g_thumbs.gd")
 const A2GProjectView = preload("res://addons/assets2godot/a2g/a2g_project_view.tscn")
+const A2GProviderDownloads = preload("res://addons/assets2godot/a2g/a2g_provider_downloads.gd")
 const A2GSceneAssets = preload("res://addons/assets2godot/a2g/a2g_scene_assets.gd")
 const A2GDetails = preload("res://addons/assets2godot/a2g/a2g_details.gd")
 const A2GImportDialog = preload("res://addons/assets2godot/a2g/a2g_import_dialog.gd")
@@ -66,6 +67,10 @@ var _preview_map := {}
 var _view_mode := View.GRID
 var _list_entries: Array = []
 var _split_btn: Button
+## Invisible expander standing in for the search field while the browser
+## controls are hidden — keeps the split button pinned to the toolbar's
+## right edge instead of sliding left against the Sources cluster.
+var _split_spacer: Control
 ## Base tile column pitch (thumb * 1.5 * edscale) — _fit_columns widens
 ## the actual fixed_column_width so the last column ends at the field
 ## edge instead of leaving a dead strip.
@@ -78,13 +83,18 @@ var _split_offset_h := 0
 var _split_offset_v := 0
 ## Browser controls that hide in TREE_ONLY mode (split button stays).
 var _browser_toolbar_controls: Array[Control] = []
-## The downloaded-to-project surface: the gallery's real ProjectView inside
-## the same Scroll → Border chrome, swapped in when the Sources tree's
-## "Downloaded to project" row is selected.
+## The downloaded-to-project surface: the gallery's real ProjectView for
+## BlendKit, the shared provider-downloads view for every other remote —
+## inside the same Scroll → Border chrome, swapped in when the Sources
+## tree's "Downloaded to project" row is selected.
 var _dl_scroll: ScrollContainer
 var _dl_border: PanelContainer
 var _dl_view: VBoxContainer
+var _pd_view: VBoxContainer
 var _dl_active := false
+## Which downloads view the active row wants — "" = BlendKit's own
+## project view, anything else is an in-plugin provider key.
+var _dl_provider := ""
 var _dl_fit_queued := false
 ## The folded-in Assets surface (project files + open-scene resources):
 ## the same A2GSceneAssets panel that used to be a main tab, swapped in
@@ -177,7 +187,15 @@ func _ready() -> void:
 	_update_sort_checks()
 	host.add_child(_sort_btn)
 	# Split-mode toggle — the FS dock puts display_mode at the right end of
-	# the file panel's toolbar, not on the tree side.
+	# the file panel's toolbar, not on the tree side. It stays visible when
+	# the other controls hide (TREE_ONLY, downloads/scene views); the
+	# expanding search field that normally pushes it right is gone then,
+	# so a hidden spacer takes over — the icon keeps sitting right where
+	# search/refresh sit instead of drifting left.
+	_split_spacer = Control.new()
+	_split_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_split_spacer.visible = false
+	host.add_child(_split_spacer)
 	_split_btn = Button.new()
 	_split_btn.theme_type_variation = "FlatButton"
 	_split_btn.tooltip_text = "Change split mode — sources left/right or top/bottom."
@@ -242,6 +260,13 @@ func _ready() -> void:
 	_dl_scroll.add_child(_dl_border)
 	_dl_view = A2GProjectView.instantiate()
 	_dl_border.add_child(_dl_view)
+	# The in-plugin providers' downloads surface shares the same border —
+	# one visible at a time, dispatched by the Sources row's provider key.
+	_pd_view = A2GProviderDownloads.new()
+	_pd_view.name = "ProviderDownloads"
+	_pd_view.visible = false
+	_dl_border.add_child(_pd_view)
+	_pd_view.setup(plugin)
 	_dl_scroll.resized.connect(_queue_dl_fit)
 	_dl_scroll.get_v_scroll_bar().visibility_changed.connect(_queue_dl_fit)
 	# setup() needs the BlendKit tab's Downloads model, which the gallery
@@ -318,9 +343,22 @@ func show_view_mode(mode: StringName, provider := "", root := "") -> void:
 		_wanted_source = {"provider": provider, "root": root}
 		_apply_source_filter()
 	_dl_active = mode == &"downloads" and _dl_scroll != null
+	_dl_provider = provider if _dl_active else ""
 	_sa_mode = mode if mode in [&"project", &"scene"] and _sa_view != null else &""
 	if _dl_scroll != null:
 		_dl_scroll.visible = _dl_active
+	# The active downloads view: a resolvable in-plugin provider key gets
+	# the shared provider-downloads surface; BlendKit rows ("", "blendkit",
+	# unknown keys) keep the upstream project view.
+	var pd_dl := _dl_active and _dl_provider not in ["", "blendkit"] \
+		and plugin.provider_pane(_dl_provider) != null
+	var bk_dl := _dl_active and not pd_dl
+	if _dl_view != null:
+		_dl_view.visible = bk_dl
+	if _pd_view != null:
+		_pd_view.visible = pd_dl
+		if pd_dl:
+			_pd_view.show_provider(_dl_provider)
 	if _sa_view != null:
 		_sa_view.visible = _sa_mode != &""
 		if _sa_mode != &"":
@@ -330,8 +368,10 @@ func show_view_mode(mode: StringName, provider := "", root := "") -> void:
 	_update_toolbar_visibility()
 	# project is null until _wire_downloads_view ran — refresh would crash
 	# on the unset index before that.
-	if _dl_active and _dl_view.get("project") != null:
+	if bk_dl and _dl_view.get("project") != null:
 		_dl_view.refresh_if_shown()
+		_queue_dl_fit()
+	elif pd_dl:
 		_queue_dl_fit()
 
 
@@ -362,6 +402,9 @@ func _update_toolbar_visibility() -> void:
 	var hide := _dl_active or _sa_mode != &"" or _split_mode == SplitMode.TREE_ONLY
 	for c in _browser_toolbar_controls:
 		c.visible = not hide
+	# Opposite of the controls above: while they're hidden the spacer
+	# expands and anchors the split button at the toolbar's right edge.
+	_split_spacer.visible = hide
 
 
 func _queue_dl_fit() -> void:
@@ -372,11 +415,13 @@ func _queue_dl_fit() -> void:
 
 
 ## Our grid isn't covered by gallery.update_columns() — fit it to this
-## pane's width with the same math (A2GUI.update_columns).
+## pane's width with the same math (A2GUI.update_columns), on whichever
+## downloads view is showing.
 func _apply_dl_fit() -> void:
 	_dl_fit_queued = false
-	if _dl_view != null and _dl_view.is_visible_in_tree():
-		A2GUI.update_columns(_dl_scroll, _dl_view.grid, _dl_border)
+	var view: Control = _pd_view if _pd_view != null and _pd_view.is_visible_in_tree() else _dl_view
+	if view != null and view.is_visible_in_tree():
+		A2GUI.update_columns(_dl_scroll, view.grid, _dl_border)
 
 
 ## Public refresh entry — the dock emits `scanned` into this after a scan

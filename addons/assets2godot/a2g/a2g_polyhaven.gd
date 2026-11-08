@@ -12,6 +12,9 @@ const Conversions = preload("res://addons/assets2godot/conversions.gd")
 const PhMenuButton = preload("res://addons/assets2godot/a2g/a2g_ph_menu_button.gd")
 const PhDetails = preload("res://addons/assets2godot/a2g/a2g_ph_details.gd")
 
+## This provider's key in the plugin's PROVIDERS registry — tab switch,
+## Sources row and downloads surface all share it.
+const PROVIDER_KEY := "polyhaven"
 ## Editor setting holding the absolute download target dir. "" = auto:
 ## a local_dir root named like *polyhaven*, else res://Assets2Godot/polyhaven.
 const SETTING_DIR := "assets2godot/polyhaven_dir"
@@ -60,6 +63,12 @@ var _dl_queue: Array = []
 var _dl_dest := ""
 var _dl_req: HTTPRequest
 var _dl_done := {}
+## Cards outside _cards that still want their slug's thumbnail — the A2G
+## downloads surface's tiles, kept weak-ish by pruning in _push_thumb.
+var _thumb_watchers := {}
+## Synthesized asset dicts for downloaded slugs the catalog doesn't list —
+## keeps details/state working for disk-only downloads.
+var _dl_extra_assets := {}
 var _converting := false
 var _updating_theme := false
 
@@ -287,6 +296,10 @@ func _fetch_url(url: String, cb: Callable, track_state := false) -> void:
 
 
 func _reload() -> void:
+	# Provider switched off in the A2G menu — no catalog fetch while its
+	# tab stays hidden; re-enabling reloads on first show.
+	if plugin != null and not plugin.provider_enabled(PROVIDER_KEY):
+		return
 	var slug := str(_type.get_selected_metadata()) if _type.selected >= 0 else ""
 	var needed: Array = [slug] if slug != "" else ["models", "textures", "hdris"]
 	var missing := needed.filter(func(t): return not _cache.has(t))
@@ -369,22 +382,13 @@ func _rebuild() -> void:
 		if shown >= PAGE_MAX:
 			continue
 		shown += 1
-		# The chip mirrors BK's plan badge: the honest equivalent for an
-		# all-CC0 catalog is the license itself (type stays on filter/icon).
-		var card: Control = A2GUI.asset_card(str(a.get("name", "?")), "CC0",
-			"polyhaven", "", null, str(PhApi.TYPE_ICONS.get(a.get("type", ""), "File")),
-			{"remote_slug": slug, "remote_title": str(a.get("name", slug)),
-				"remote_url": PhApi.web_url(slug),
-				"remote_site": "polyhaven.com",
-				"remote_options": Callable(self, "_remote_options_for").bind(slug),
-				"remote_download": Callable(self, "_remote_download").bind(slug),
-				"remote_state": Callable(self, "_remote_state").bind(slug),
-				"remote_dir": Callable(self, "_downloaded_dir").bind(slug),
-				"remote_details": Callable(self, "_show_details").bind(slug)})
-		card.connect("selected", func(_asset): _show_details(slug))
+		var card := _make_card(a, downloaded.has(slug))
 		_grid.add_child(card)
+		# Register BEFORE queueing the thumb: a cached hit inside
+		# _queue_thumb pushes synchronously through _cards — it must find
+		# this card or the texture is dropped (thumbs fetched during the
+		# catalog load hit exactly this on the finish rebuild).
 		_cards[slug] = card
-		card.call("set_downloaded", downloaded.has(slug))
 		_queue_thumb(a)
 	_empty.visible = matched == 0
 	if matched == 0:
@@ -410,19 +414,86 @@ func _rebuild() -> void:
 	_fetch_roots()
 
 
-## Slugs of downloaded assets: this session's finished downloads plus any
-## asset folder already under the download target (<target>/<type>/<slug>) —
-## the toggle's "downloaded" view, mirroring BlendKit's project view.
+## One catalog/downloaded asset → the shared card: remote_* payload and
+## downloaded badge — the exact tile _rebuild lists and the A2G downloads
+## surface borrows via make_download_card(). The caller queues the thumb
+## AFTER registering the card (_cards resp. _thumb_watchers).
+func _make_card(a: Dictionary, is_downloaded := false) -> Control:
+	var slug := str(a.get("slug", ""))
+	# The chip mirrors BK's plan badge: the honest equivalent for an
+	# all-CC0 catalog is the license itself (type stays on filter/icon).
+	var card: Control = A2GUI.asset_card(str(a.get("name", "?")), "CC0",
+		"polyhaven", "", null, str(PhApi.TYPE_ICONS.get(a.get("type", ""), "File")),
+		{"remote_slug": slug, "remote_title": str(a.get("name", slug)),
+			"remote_url": PhApi.web_url(slug),
+			"remote_site": "polyhaven.com",
+			"remote_options": Callable(self, "_remote_options_for").bind(slug),
+			"remote_download": Callable(self, "_remote_download").bind(slug),
+			"remote_state": Callable(self, "_remote_state").bind(slug),
+			"remote_dir": Callable(self, "_downloaded_dir").bind(slug),
+			"remote_details": Callable(self, "_show_details").bind(slug)})
+	card.connect("selected", func(_asset): _show_details(slug))
+	card.call("set_downloaded", is_downloaded)
+	return card
+
+
+## The downloads surface's data: every downloaded slug → its asset dict.
+## Slugs on disk the catalog doesn't list still get a synthesized entry
+## (name + type from the folder) so reveal/state/quick-tile work.
+func downloaded_assets() -> Array:
+	var out := []
+	var slugs := _downloaded_slugs()
+	for slug in slugs:
+		var a := _asset_by_slug(slug)
+		out.append(a if not a.is_empty() else _synth_asset(slug, str(slugs[slug])))
+	return out
+
+
+## The exact card this tab's grid would show for [param a], for the A2G
+## downloads surface — same tile by construction, thumb delivered
+## through _thumb_watchers since the card never joins _cards.
+func make_download_card(a: Dictionary) -> Control:
+	var card := _make_card(a, true)
+	var slug := str(a.get("slug", ""))
+	if str(a.get("thumbnail_url", "")).is_empty():
+		return card
+	# Watch BEFORE queueing: a cached hit inside _queue_thumb pushes
+	# synchronously — it must find this card among the watchers.
+	_thumb_watchers.get_or_add(slug, []).append(card)
+	_queue_thumb(a)
+	return card
+
+
+## Slugs of downloaded assets → their type dir: this session's finished
+## downloads plus any asset folder under the download target
+## (<target>/<type>/<slug>) — the toggle's "downloaded" view, mirroring
+## BlendKit's project view. The type dir rides along so disk-only slugs
+## synthesize a correct asset type and _dl_state_for finds the real path.
 func _downloaded_slugs() -> Dictionary:
 	var slugs := {}
 	for slug in _dl_done:
-		slugs[slug] = true
+		slugs[slug] = str(_dl_done[slug]).get_base_dir().get_file()
 	var base := _target_dir()
 	if DirAccess.dir_exists_absolute(base):
 		for type_dir in DirAccess.get_directories_at(base):
 			for d in DirAccess.get_directories_at(base.path_join(type_dir)):
-				slugs[d] = true
+				slugs[d] = type_dir
 	return slugs
+
+
+## A disk-only slug → a minimal catalog-shaped dict: type inferred from
+## its parent folder (TYPE_DIRS reversed), name from the slug. Cached in
+## _dl_extra_assets so _asset_by_slug answers it too.
+func _synth_asset(slug: String, type_dir: String) -> Dictionary:
+	if _dl_extra_assets.has(slug):
+		return _dl_extra_assets[slug]
+	var rev := {}
+	for t in PhApi.TYPE_DIRS:
+		rev[PhApi.TYPE_DIRS[t]] = t
+	var a := {"slug": slug, "name": slug.replace("-", " ").replace("_", " ").capitalize(),
+		"type": str(rev.get(type_dir, ""))}
+	_dl_extra_assets[slug] = a
+	return a
 
 
 func _update_dl_badge() -> void:
@@ -434,11 +505,14 @@ func _update_dl_badge() -> void:
 		_dl_toggle.tooltip_text += "\n%d %s in progress" % [count, "download" if count == 1 else "downloads"]
 
 
+## Catalog lookup with the disk-only fallback: a slug the catalog doesn't
+## list but that exists under the target still answers its synthesized
+## dict, so details/state/reveal work for every downloaded asset.
 func _asset_by_slug(slug: String) -> Dictionary:
 	for a in _assets:
 		if str(a.get("slug", "")) == slug:
 			return a
-	return {}
+	return _dl_extra_assets.get(slug, {})
 
 
 # MARK: thumbnails
@@ -456,12 +530,30 @@ func _queue_thumb(asset: Dictionary) -> void:
 		return
 	var slug := str(asset.get("slug", ""))
 	if _thumb_cache.has(url):
-		var card: Control = _cards.get(slug)
-		if is_instance_valid(card):
-			card.call("set_thumb_texture", _thumb_cache[url], _thumb_fill(asset))
+		_push_thumb(slug, _thumb_cache[url], _thumb_fill(asset))
 		return
 	_thumb_queue.append(asset)
 	_pump_thumbs()
+
+
+## Delivers a finished thumbnail to the grid card AND every watcher card
+## (the A2G downloads surface's tiles) — pruning freed watchers so the
+## map never holds dead refs.
+func _push_thumb(slug: String, tex: Texture2D, fill: bool) -> void:
+	var card: Control = _cards.get(slug)
+	if is_instance_valid(card):
+		card.call("set_thumb_texture", tex, fill)
+	if not _thumb_watchers.has(slug):
+		return
+	var alive := []
+	for c: Control in _thumb_watchers[slug]:
+		if is_instance_valid(c):
+			c.call("set_thumb_texture", tex, fill)
+			alive.append(c)
+	if alive.is_empty():
+		_thumb_watchers.erase(slug)
+	else:
+		_thumb_watchers[slug] = alive
 
 
 func _pump_thumbs() -> void:
@@ -486,9 +578,7 @@ func _pump_thumbs() -> void:
 				if err == OK:
 					var tex := ImageTexture.create_from_image(img)
 					_thumb_cache[url] = tex
-					var card: Control = _cards.get(slug)
-					if is_instance_valid(card):
-						card.call("set_thumb_texture", tex, _thumb_fill(a))
+					_push_thumb(slug, tex, _thumb_fill(a))
 			_pump_thumbs())
 		if req.request(url, [PhApi.UA_HEADER]) != OK:
 			req.queue_free()
@@ -515,14 +605,17 @@ func _show_details(slug: String) -> void:
 
 ## The state the popup's action button needs: downloaded folder when the
 ## asset's dir exists under the target, downloading while its queue runs.
+## The real type dir comes from the disk scan — a slug the catalog
+## doesn't list resolves just as correctly as a fresh download does.
 func _dl_state_for(slug: String) -> Dictionary:
 	var dir := str(_dl_done.get(slug, ""))
 	if dir.is_empty():
-		var a := _asset_by_slug(slug)
-		var d := _target_dir().path_join(str(PhApi.TYPE_DIRS.get(a.get("type", ""), "misc"))) \
-			.path_join(slug)
-		if DirAccess.dir_exists_absolute(d):
-			dir = d
+		var slugs := _downloaded_slugs()
+		# Disk folders carry the validate_filename()d slug — try both.
+		for s in [slug, slug.validate_filename()]:
+			if slugs.has(s):
+				dir = _target_dir().path_join(str(slugs[s])).path_join(s)
+				break
 	return {"dir": dir,
 		"downloading": (_dl_req != null or _converting) \
 			and str(_dl_asset.get("slug", "")) == slug}
