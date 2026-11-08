@@ -5,9 +5,9 @@
 /client-dist
 # client binaries (built on-demand)
 /addons/assets2godot/client
-# downloaded assets — bk_assets is BlendKit's; a2g providers share
-# res://Assets2Godot/<provider>/, so every child dir is a download
-# root except the tracked test/ stage
+# downloaded assets — everything lands under res://Assets2Godot/
+# (provider roots + bk_assets); every child dir is a download root
+# except the tracked test/ stage. /bk_assets kept for old layouts.
 /bk_assets
 /Assets2Godot/*/
 !/Assets2Godot/test/
