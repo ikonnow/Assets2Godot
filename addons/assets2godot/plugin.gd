@@ -27,6 +27,11 @@ const SETTING_A2G_SCENE_CAP = "assets2godot/scene_resource_cap"
 const SETTING_A2G_SHOW_FILES = "assets2godot/show_all_files"
 # Per-provider tab visibility — "assets2godot/providers/<key>_enabled".
 const SETTING_A2G_PROVIDER = "assets2godot/providers/%s_enabled"
+# Opt-in provider logos inside the tabs — off keeps them text-only.
+const SETTING_A2G_TAB_LOGOS = "assets2godot/tab_logos"
+# Tab logo render size — just under the 16px icon_max_width cap so the
+# mark keeps breathing room inside its slot, like editor icons' padding.
+const TAB_LOGO_PX := 14.0
 # Older keys moved to the settings above.
 const OLD_SETTINGS = {"blendkit/model_format": SETTING_MODEL_FORMAT, "blendkit/resolution": SETTING_RESOLUTION}
 # Godot's enum hints can't hold an empty value, so Auto resolution "" is stored as this.
@@ -368,8 +373,9 @@ func init_gallery() -> void:
 ## Registers [param pane] as a full-rect stack pane plus a TabBar tab
 ## titled with the pane's name. A provider [param key] puts the pane in
 ## the provider registry (Sources rows, settings switches) and honors a
-## stored tab-off setting. Tabs stay text-only — the provider logos live
-## in the Sources rows and the settings menu instead.
+## stored tab-off setting. Tabs stay text-only unless the A2G menu's
+## "Provider logos in tabs" switch (assets2godot/tab_logos) is on —
+## _apply_tab_logo renders the mark then.
 ## Returns the tab index.
 func _add_tab_pane(panes: Control, pane: Control, key := "") -> int:
 	pane.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -380,15 +386,52 @@ func _add_tab_pane(panes: Control, pane: Control, key := "") -> int:
 	var idx := _tab_bar.tab_count - 1
 	if key != "":
 		_provider_panes[key] = pane
-		# The registry's mark on the tab itself — same logo the Sources
-		# row and the settings menu show, so a provider reads identically
-		# on every surface.
-		var icon := A2GUI.provider_icon(key)
-		if icon != null:
-			_tab_bar.set_tab_icon(idx, icon)
+		_apply_tab_logo(idx)
 		if not provider_enabled(key):
 			_set_tab_visible(idx, false)
 	return idx
+
+
+## Whether provider tabs carry their logo — the A2G menu's "Provider
+## logos in tabs" switch (assets2godot/tab_logos), default off.
+func tab_logos_enabled() -> bool:
+	var es := EditorInterface.get_editor_settings()
+	if es and es.has_setting(SETTING_A2G_TAB_LOGOS):
+		return bool(es.get_setting(SETTING_A2G_TAB_LOGOS))
+	return false
+
+
+## The settings menu's logo switch — persists and re-applies every tab
+## icon immediately, so the change needs neither restart nor reload.
+func set_tab_logos(enabled: bool) -> void:
+	var es := EditorInterface.get_editor_settings()
+	if es:
+		es.set_setting(SETTING_A2G_TAB_LOGOS, enabled)
+	for i in _tab_panes.size():
+		_apply_tab_logo(i)
+
+
+## Sets or clears the tab's provider logo per the tab_logos setting.
+## Off = a null icon — plain text like the editor's own tabs. On =
+## the provider's mark rendered under the icon_max_width cap
+## (style_tabbar copied it from TabContainer) so it stays padded.
+func _apply_tab_logo(idx: int) -> void:
+	var key := _pane_provider_key(_tab_panes[idx])
+	var icon: Texture2D = null
+	if not key.is_empty() and tab_logos_enabled():
+		icon = A2GUI.provider_icon(key, TAB_LOGO_PX)
+	_tab_bar.set_tab_icon(idx, icon)
+	_tab_bar.set_tab_icon_max_width(idx,
+		int(TAB_LOGO_PX * EditorInterface.get_editor_scale()))
+
+
+## The registered provider key owning [param pane], "" for a pane that
+## isn't a provider tab.
+func _pane_provider_key(pane: Control) -> String:
+	for key in _provider_panes:
+		if _provider_panes[key] == pane:
+			return key
+	return ""
 
 
 ## Whether provider [param key]'s tab is on — the settings menu's
@@ -606,6 +649,7 @@ func init_settings() -> void:
 	add_editor_setting(SETTING_A2G_THUMB_SIZE, 256, PROPERTY_HINT_ENUM, "128,256,512")
 	add_editor_setting(SETTING_A2G_SCENE_CAP, 300, PROPERTY_HINT_RANGE, "50,2000,50")
 	add_editor_setting(SETTING_A2G_SHOW_FILES, false)
+	add_editor_setting(SETTING_A2G_TAB_LOGOS, false)
 	for p in PROVIDERS:
 		add_editor_setting(SETTING_A2G_PROVIDER % str(p.get("key", "")), true)
 	# After registering, so migrated defaults aren't written to project.godot.
