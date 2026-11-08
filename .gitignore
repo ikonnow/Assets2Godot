@@ -5,8 +5,12 @@
 /client-dist
 # client binaries (built on-demand)
 /addons/assets2godot/client
-# downloaded assets
+# downloaded assets — each provider gets its own res://<name>_assets root
 /bk_assets
+/polyhaven_assets
+/ambientcg_assets
+# provider download-test fixtures (test_provider_downloads.gd → test/main_test.tscn)
+/test/downloads/
 # godot-ai MCP addon (user-installed editor tooling, not ours)
 /addons/godot_ai
 /out

@@ -68,10 +68,9 @@ func _ready() -> void:
 	_panes.add_child(left)
 	_frame = PanelContainer.new()
 	_frame.clip_contents = true
-	var mask := StyleBoxFlat.new()
-	mask.bg_color = Color.WHITE
-	mask.set_corner_radius_all(int(8 * edscale))
-	_frame.add_theme_stylebox_override("panel", mask)
+	# No panel override: asset_details' PreviewFrame is a plain
+	# PanelContainer — the theme's own dark panel shows through the
+	# render's transparent margins, never a white box.
 	left.add_child(_frame)
 	_preview = TextureRect.new()
 	_preview.custom_minimum_size = Vector2.ONE * 400 * edscale
@@ -301,7 +300,10 @@ func _fetch_preview(url: String) -> void:
 		if err != OK:
 			err = img.load_jpg_from_buffer(body)
 		if err == OK:
+			# The real render replaces the card's low-res tile outright —
+			# one picture is enough, no thumb-vs-render strip.
 			_textures["primary"] = ImageTexture.create_from_image(img)
+			_textures.erase("thumb")
 			_set_frame("primary")
 			_rebuild_strip())
 	if _req.request(url, [AcgApi.UA_HEADER]) != OK:

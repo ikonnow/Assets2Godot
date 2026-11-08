@@ -8,11 +8,12 @@ extends PanelContainer
 const Icons = preload("res://addons/assets2godot/ui/icons.gd")
 const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
 const PhApi = preload("res://addons/assets2godot/a2g/polyhaven_api.gd")
+const Conversions = preload("res://addons/assets2godot/conversions.gd")
 const PhMenuButton = preload("res://addons/assets2godot/a2g/a2g_ph_menu_button.gd")
 const PhDetails = preload("res://addons/assets2godot/a2g/a2g_ph_details.gd")
 
 ## Editor setting holding the absolute download target dir. "" = auto:
-## a local_dir root named like *polyhaven*, else <download_dir>/polyhaven.
+## a local_dir root named like *polyhaven*, else res://polyhaven_assets.
 const SETTING_DIR := "assets2godot/polyhaven_dir"
 ## Rendered-cards cap: the API returns whole type lists (~1k each);
 ## sorted by download_count the cap keeps the popular end.
@@ -59,6 +60,7 @@ var _dl_queue: Array = []
 var _dl_dest := ""
 var _dl_req: HTTPRequest
 var _dl_done := {}
+var _converting := false
 var _updating_theme := false
 
 
@@ -354,7 +356,7 @@ func _rebuild() -> void:
 	_thumb_queue.clear()
 	var text := _search.text
 	var cat := str(_cat_btn.get_selected_metadata()) if _cat_btn.selected > 0 else ""
-	var downloaded := _downloaded_slugs() if _dl_only else {}
+	var downloaded := _downloaded_slugs()
 	var shown := 0
 	var matched := 0
 	for a in _assets:
@@ -382,6 +384,7 @@ func _rebuild() -> void:
 		card.connect("selected", func(_asset): _show_details(slug))
 		_grid.add_child(card)
 		_cards[slug] = card
+		card.call("set_downloaded", downloaded.has(slug))
 		_queue_thumb(a)
 	_empty.visible = matched == 0
 	if matched == 0:
@@ -521,7 +524,8 @@ func _dl_state_for(slug: String) -> Dictionary:
 		if DirAccess.dir_exists_absolute(d):
 			dir = d
 	return {"dir": dir,
-		"downloading": _dl_req != null and str(_dl_asset.get("slug", "")) == slug}
+		"downloading": (_dl_req != null or _converting) \
+			and str(_dl_asset.get("slug", "")) == slug}
 
 
 # MARK: quick-download tile callbacks (the card's remote_* payload)
@@ -561,11 +565,11 @@ func _remote_download(slug: String, data: Variant) -> void:
 ## Tile button state: our queue is single-flight, so a running download
 ## disables it — "Downloading…" on this asset, a note on the others.
 func _remote_state(slug: String, _data: Variant) -> Dictionary:
-	if _dl_req == null:
+	if _dl_req == null and not _converting:
 		return {}
 	var this := str(_dl_asset.get("slug", "")) == slug
 	return {"enabled": false,
-		"label": "Downloading…" if this else "Download",
+		"label": ("Converting…" if _converting else "Downloading…") if this else "Download",
 		"note": "" if this else "A download is running — wait for it to finish."}
 
 
@@ -574,7 +578,7 @@ func _remote_state(slug: String, _data: Variant) -> Dictionary:
 ## Shared start for the quick tile's remote_download and the popup's
 ## download_requested — the same queue either way.
 func _start_download(asset: Dictionary, option: Dictionary) -> void:
-	if _dl_req != null:
+	if _dl_req != null or _converting:
 		_status.text = "A download is running — wait for it to finish."
 		return
 	var dir := _target_dir()
@@ -656,8 +660,22 @@ func _dl_finish() -> void:
 	set_process(false)
 	_update_dl_badge()
 	var slug := str(_dl_asset.get("slug", ""))
+	# The post-download Godot adaptation: files Godot can't use (unreadable
+	# EXR, material .blend) convert where they landed — the provider writes
+	# straight into the final dir, so there's no staged move like BlendKit's.
+	var note := await _convert_downloads()
+	# Flat <stem>.tres + <stem>_* maps get BlendKit's folder layout
+	# (.tres up top, maps in textures_<tag>/); bare map sets (a "JPG 2K"
+	# download) materialize into <slug>_<RES>.tres + textures_<RES>/;
+	# surviving .blends get keep-marked for the import bridge.
+	Conversions.organize_materials(_dl_dest)
+	Conversions.materialize_maps(_dl_dest)
+	Conversions.keep_unimported(_dl_dest)
 	_dl_done[slug] = _dl_dest
-	_status.text = "Downloaded %s → %s" % [str(_dl_asset.get("name", slug)), A2GUI.short_path(_dl_dest)]
+	_status.text = "Downloaded %s → %s%s" % [str(_dl_asset.get("name", slug)), A2GUI.short_path(_dl_dest), note]
+	var card: Control = _cards.get(slug)
+	if is_instance_valid(card):
+		card.call("set_downloaded", true)
 	if _details.visible and str(_details.asset.get("slug", "")) == slug:
 		_details.refresh_state()
 	# _dl_dest is absolute (absolute_download_path is globalized), so an
@@ -669,6 +687,28 @@ func _dl_finish() -> void:
 		_post_client("providers/local_dir/scan", {})
 
 
+## Run the post-download conversion pass over the asset folder —
+## Conversions decides what needs it (DWAA-compressed EXRs are unreadable
+## to Godot, material .blends become .tres). Returns a status suffix, ""
+## when nothing needed converting or all of it worked.
+func _convert_downloads() -> String:
+	if Conversions.collect(_dl_dest).is_empty():
+		return ""
+	_converting = true
+	_status.text = Conversions.MESSAGE + "…"
+	var result: Dictionary = await Conversions.convert_dir(_dl_dest)
+	_converting = false
+	var failed: Array = result.get("failed", [])
+	if str(result.get("reason", "")) == "no blender":
+		plugin.log_warning("The Polyhaven download needs Blender to adapt it for Godot — the files were kept as they are.")
+		return " (kept raw — Blender not found)"
+	if failed.is_empty():
+		return ""
+	plugin.log_warning("%d Polyhaven file(s) could not be converted for Godot: %s" \
+		% [failed.size(), str(failed[0].get("error", ""))])
+	return " (%d file(s) couldn't be converted)" % failed.size()
+
+
 # MARK: target dir + client
 
 func _pick_target() -> void:
@@ -676,22 +716,23 @@ func _pick_target() -> void:
 	_file_dlg.popup_centered_ratio(0.6)
 
 
-## The download target: the editor setting, else a local_dir root named
-## like *polyhaven*, else <download_dir>/polyhaven.
+## The download target: the editor setting, else the provider's own
+## project root — like BlendKit's bk_assets, downloads land in the
+## project, never on some external path picked by name.
 func _target_dir() -> String:
 	var es := EditorInterface.get_editor_settings()
 	if es and es.has_setting(SETTING_DIR):
 		var dir := str(es.get_setting(SETTING_DIR))
 		if not dir.is_empty():
 			return dir
-	for root in _local_roots:
-		if str(root).get_file().to_lower().contains("polyhaven"):
-			return str(root)
-	return plugin.absolute_download_path.path_join("polyhaven")
+	# own root beside bk_assets — globalized so _dl_dest stays absolute
+	return ProjectSettings.globalize_path("res://polyhaven_assets")
 
 
+## The downloaded folder for the tile's reveal action — _dl_state_for's
+## disk check, so it survives an editor restart like the popup's does.
 func _downloaded_dir(slug: String) -> String:
-	return str(_dl_done.get(slug, ""))
+	return str(_dl_state_for(slug).get("dir", ""))
 
 
 func _in_local_root(path: String) -> bool:

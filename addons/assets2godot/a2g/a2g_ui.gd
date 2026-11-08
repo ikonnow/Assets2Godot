@@ -293,6 +293,8 @@ static func _on_bk_card_input(item: Control, ev: InputEvent, gallery: Control) -
 ## gallery's own Downloads model so progress shows on the card as usual.
 static func _bk_remote_entry(asset: Dictionary, gallery: Control) -> Dictionary:
 	var plugin = gallery.get("plugin")
+	if plugin == null or not is_instance_valid(plugin):
+		return {}
 	var opts := _bk_options(asset, plugin)
 	var default_ft := GalleryApi.pick_file_type(asset,
 		str(plugin.model_format), plugin.download_resolution())

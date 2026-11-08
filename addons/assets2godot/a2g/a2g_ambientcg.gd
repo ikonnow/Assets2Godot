@@ -17,11 +17,12 @@ extends PanelContainer
 const Icons = preload("res://addons/assets2godot/ui/icons.gd")
 const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
 const AcgApi = preload("res://addons/assets2godot/a2g/ambientcg_api.gd")
+const Conversions = preload("res://addons/assets2godot/conversions.gd")
 const AcgMenuButton = preload("res://addons/assets2godot/a2g/a2g_acg_menu_button.gd")
 const AcgDetails = preload("res://addons/assets2godot/a2g/a2g_acg_details.gd")
 
 ## Editor setting holding the absolute download target dir. "" = auto:
-## a local_dir root named like *ambientcg*, else <download_dir>/ambientcg.
+## a local_dir root named like *ambientcg*, else res://ambientcg_assets.
 const SETTING_DIR := "assets2godot/ambientcg_dir"
 ## Rendered-cards cap: the full catalog is ~3k assets; the cap keeps the
 ## popular end (default sort) while PAGE_SIZE fetches stay cheap.
@@ -30,6 +31,13 @@ const THUMB_PARALLEL := 4
 ## Redirect hops allowed on a download — ambientcg.com/get 302s once to
 ## acg-download.struffelproductions.com.
 const MAX_REDIRECTS := 4
+## Source formats skipped on zip extract: not importable in Godot, and a
+## .blend under res:// makes the GUI editor pop its Blender-locate dialog
+## during the filesystem scan — a native crash path.
+## Source formats Godot can't import — they stay out of the project like
+## BlendKit's, not just unimportable but useless there (.blend also
+## triggers the editor's Blender-locate path during scan → crash).
+const EXTRACT_SKIP_EXTS := ["blend", "usd", "usda", "usdc", "usdz", "mtlx"]
 
 var plugin: EditorPlugin
 
@@ -80,6 +88,7 @@ var _dl_dest := ""
 var _dl_req: HTTPRequest
 var _dl_done := {}
 var _dl_zips: Array = []
+var _converting := false
 var _updating_theme := false
 
 
@@ -346,7 +355,9 @@ func _reload() -> void:
 
 ## A catalog page arrived: page 0 reveals totalResults, so it also fires
 ## the remaining offsets in parallel — every page merges deduped assets
-## into the facet bucket until the count is exhausted.
+## into the facet bucket until the count is exhausted. Pages render as
+## they land (the API answers each in seconds): the grid fills live and
+## the final pass below still does the authoritative rebuild.
 func _on_catalog_page(key: String, offset: int, text: String) -> void:
 	var st: Dictionary = _pages.get(key, {})
 	if st.is_empty():
@@ -369,6 +380,11 @@ func _on_catalog_page(key: String, offset: int, text: String) -> void:
 			continue
 		seen[slug] = true
 		st["assets"].append(a)
+	if key == _facet_key() and not st["assets"].is_empty():
+		_assets = st["assets"]
+		AcgApi.sort_assets(_assets, str(_sort_btn.get_selected_metadata()) \
+			if _sort_btn.selected >= 0 else "popular")
+		_rebuild()
 	if offset == 0:
 		var total := AcgApi.parse_total(raw)
 		var extra := 0
@@ -423,7 +439,7 @@ func _rebuild() -> void:
 	_cards.clear()
 	_thumb_queue.clear()
 	var text := _search.text
-	var downloaded := _downloaded_slugs() if _dl_only else {}
+	var downloaded := _downloaded_slugs()
 	var shown := 0
 	var matched := 0
 	for a in _assets:
@@ -451,6 +467,7 @@ func _rebuild() -> void:
 		card.connect("selected", func(_asset): _show_details(slug))
 		_grid.add_child(card)
 		_cards[slug] = card
+		card.call("set_downloaded", downloaded.has(slug))
 		_queue_thumb(a)
 	_empty.visible = matched == 0
 	if matched == 0:
@@ -472,6 +489,8 @@ func _rebuild() -> void:
 		_status.text = "%d matches of %d" % [matched, total]
 	else:
 		_status.text = "%d assets" % total
+	if not _pages.is_empty():
+		_status.text += " — loading more…"
 	A2GUI.update_columns(_scroll, _grid, _border)
 	_fetch_roots()
 
@@ -583,7 +602,8 @@ func _dl_state_for(slug: String) -> Dictionary:
 		if DirAccess.dir_exists_absolute(d):
 			dir = d
 	return {"dir": dir,
-		"downloading": _dl_req != null and str(_dl_asset.get("slug", "")) == slug}
+		"downloading": (_dl_req != null or _converting) \
+			and str(_dl_asset.get("slug", "")) == slug}
 
 
 # MARK: quick-download tile callbacks (the card's remote_* payload)
@@ -623,11 +643,11 @@ func _remote_download(slug: String, data: Variant) -> void:
 ## Tile button state: our queue is single-flight, so a running download
 ## disables it — "Downloading…" on this asset, a note on the others.
 func _remote_state(slug: String, _data: Variant) -> Dictionary:
-	if _dl_req == null:
+	if _dl_req == null and not _converting:
 		return {}
 	var this := str(_dl_asset.get("slug", "")) == slug
 	return {"enabled": false,
-		"label": "Downloading…" if this else "Download",
+		"label": ("Converting…" if _converting else "Downloading…") if this else "Download",
 		"note": "" if this else "A download is running — wait for it to finish."}
 
 
@@ -636,7 +656,7 @@ func _remote_state(slug: String, _data: Variant) -> Dictionary:
 ## Shared start for the quick tile's remote_download and the popup's
 ## download_requested — the same queue either way.
 func _start_download(asset: Dictionary, option: Dictionary) -> void:
-	if _dl_req != null:
+	if _dl_req != null or _converting:
 		_status.text = "A download is running — wait for it to finish."
 		return
 	var dir := _target_dir()
@@ -701,7 +721,8 @@ func _dl_send(url: String, dest: String, redirs: int) -> void:
 			_dl_zips.append(dest)
 		_dl_queue.pop_front()
 		_dl_next())
-	if _dl_req.request(url, [AcgApi.UA_HEADER]) != OK:
+	# raw redirect paths carry spaces/^ — encode_url before requesting
+	if _dl_req.request(AcgApi.encode_url(url), [AcgApi.UA_HEADER]) != OK:
 		_dl_req.queue_free()
 		_dl_req = null
 		_dl_fail(dest, "request did not start")
@@ -752,8 +773,23 @@ func _dl_finish() -> void:
 		else:
 			failed += 1
 	_dl_zips.clear()
+	# The post-download Godot adaptation runs AFTER extraction — it must see
+	# the zip's contents (maps, .blend, .tres), not the archive. ambientCG
+	# ships Godot-ready .tres, so its .blends stay untouched; whatever still
+	# needs converting (e.g. an unreadable EXR) converts where it landed.
+	var note := await _convert_downloads()
+	# ambientCG's zips ship flat folders: <stem>.tres + <stem>_* maps —
+	# reorganize into BlendKit's layout (.tres up top, maps in
+	# textures_<tag>/); surviving .blends get keep-marked so the scan
+	# doesn't feed them to the import bridge.
+	Conversions.organize_materials(_dl_dest)
+	Conversions.materialize_maps(_dl_dest)
+	Conversions.keep_unimported(_dl_dest)
 	_dl_done[slug] = _dl_dest
-	_status.text = "Downloaded %s → %s" % [str(_dl_asset.get("name", slug)), A2GUI.short_path(_dl_dest)]
+	_status.text = "Downloaded %s → %s%s" % [str(_dl_asset.get("name", slug)), A2GUI.short_path(_dl_dest), note]
+	var card: Control = _cards.get(slug)
+	if is_instance_valid(card):
+		card.call("set_downloaded", true)
 	if failed > 0:
 		_status.text += " (%d archive(s) left unextracted)" % failed
 	if _details.visible and str(_details.asset.get("slug", "")) == slug:
@@ -781,6 +817,19 @@ func _extract_zip(path: String) -> bool:
 		if rel.is_empty() or rel.ends_with("/") or ":" in rel \
 				or ".." in rel.split("/"):
 			continue
+		# .blend/.usd* are source formats Godot can't import — and a
+		# .blend under res:// makes the GUI editor pop the Blender-locate
+		# dialog during scan → native crash. Keep importable content only.
+		if rel.get_extension().to_lower() in EXTRACT_SKIP_EXTS:
+			continue
+		# <slug>.<img>/preview.<img> at the root is the archive's site
+		# thumbnail — maps always carry a <stem>_* suffix. BlendKit
+		# doesn't store previews either; the index uses remote thumbs.
+		if not "/" in rel and rel.get_extension().to_lower() in \
+				["png", "jpg", "jpeg", "webp"] \
+				and rel.get_basename().to_lower() in \
+				[base.get_file().to_lower(), "preview", "thumbnail"]:
+			continue
 		var target := base.path_join(rel)
 		DirAccess.make_dir_recursive_absolute(target.get_base_dir())
 		var f := FileAccess.open(target, FileAccess.WRITE)
@@ -793,6 +842,28 @@ func _extract_zip(path: String) -> bool:
 	return ok
 
 
+## Run the post-download conversion pass over the asset folder —
+## Conversions decides what needs it (unreadable EXRs, material .blends
+## without a shipped .tres). Returns a status suffix, "" when nothing
+## needed converting or all of it worked.
+func _convert_downloads() -> String:
+	if Conversions.collect(_dl_dest).is_empty():
+		return ""
+	_converting = true
+	_status.text = Conversions.MESSAGE + "…"
+	var result: Dictionary = await Conversions.convert_dir(_dl_dest)
+	_converting = false
+	var failed: Array = result.get("failed", [])
+	if str(result.get("reason", "")) == "no blender":
+		plugin.log_warning("The ambientCG download needs Blender to adapt it for Godot — the files were kept as they are.")
+		return " (kept raw — Blender not found)"
+	if failed.is_empty():
+		return ""
+	plugin.log_warning("%d ambientCG file(s) could not be converted for Godot: %s" \
+		% [failed.size(), str(failed[0].get("error", ""))])
+	return " (%d file(s) couldn't be converted)" % failed.size()
+
+
 # MARK: target dir + client
 
 func _pick_target() -> void:
@@ -800,22 +871,23 @@ func _pick_target() -> void:
 	_file_dlg.popup_centered_ratio(0.6)
 
 
-## The download target: the editor setting, else a local_dir root named
-## like *ambientcg*, else <download_dir>/ambientcg.
+## The download target: the editor setting, else the provider's own
+## project root — like BlendKit's bk_assets, downloads land in the
+## project, never on some external path picked by name.
 func _target_dir() -> String:
 	var es := EditorInterface.get_editor_settings()
 	if es and es.has_setting(SETTING_DIR):
 		var dir := str(es.get_setting(SETTING_DIR))
 		if not dir.is_empty():
 			return dir
-	for root in _local_roots:
-		if str(root).get_file().to_lower().contains("ambientcg"):
-			return str(root)
-	return plugin.absolute_download_path.path_join("ambientcg")
+	# own root beside bk_assets — globalized so _dl_dest stays absolute
+	return ProjectSettings.globalize_path("res://ambientcg_assets")
 
 
+## The downloaded folder for the tile's reveal action — _dl_state_for's
+## disk check, so it survives an editor restart like the popup's does.
 func _downloaded_dir(slug: String) -> String:
-	return str(_dl_done.get(slug, ""))
+	return str(_dl_state_for(slug).get("dir", ""))
 
 
 func _in_local_root(path: String) -> bool:
