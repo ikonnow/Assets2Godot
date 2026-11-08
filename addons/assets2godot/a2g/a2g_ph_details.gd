@@ -76,7 +76,8 @@ func _ready() -> void:
 	_preview = TextureRect.new()
 	_preview.custom_minimum_size = Vector2.ONE * 400 * edscale
 	_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	# same as asset_details.tscn — letterbox any preview aspect, no crop
+	_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_frame.add_child(_preview)
 	_badge = Label.new()
 	_badge.text = "CC0"

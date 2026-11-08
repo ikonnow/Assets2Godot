@@ -7,6 +7,7 @@ extends PanelContainer
 
 const Icons = preload("res://addons/assets2godot/ui/icons.gd")
 const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
+const A2GThumbs = preload("res://addons/assets2godot/a2g/a2g_thumbs.gd")
 const A2GDetails = preload("res://addons/assets2godot/a2g/a2g_details.gd")
 const A2GImportDialog = preload("res://addons/assets2godot/a2g/a2g_import_dialog.gd")
 
@@ -60,6 +61,9 @@ var _seen: Dictionary = {}
 var _details: AcceptDialog
 ## External files stage through the same import dialog the browser owns.
 var _import_dialog: ConfirmationDialog
+## Card-size (256) renderer for staged file resources — the native
+## preview queue is fixed at 64px.
+var _thumbs: A2GThumbs
 
 
 func _ready() -> void:
@@ -131,6 +135,10 @@ func _ready() -> void:
 	add_child(_details)
 	_import_dialog = A2GImportDialog.new()
 	add_child(_import_dialog)
+	_thumbs = A2GThumbs.new()
+	_thumbs.rendered.connect(_on_thumbs_rendered)
+	_thumbs.failed.connect(_on_thumbs_failed)
+	add_child(_thumbs)
 	visibility_changed.connect(_on_visibility_changed)
 	_collect()
 
@@ -349,10 +357,19 @@ func _update_columns() -> void:
 		A2GUI.update_columns(_scroll, _grid, _border)
 
 
-## File assets get a real thumbnail via the editor previewer; in-memory
-## scene resources go through the edited-resource preview path — whatever
-## has no preview generator keeps the kind-colored placeholder.
+## Renderable file resources go through the A2G rig first — it produces
+## the same preview as the native generators but at card size; the native
+## queue is fixed at 64px and looked soft here. On `failed` the native
+## queue takes over; in-memory scene resources keep the edited-preview
+## path (no path, nothing to stage from). Everything without a generator
+## keeps the kind-colored placeholder.
 func _request_preview(a: Dictionary, card: Control) -> void:
+	var path := str(a.get("path", ""))
+	if _thumbs != null and (path.get_extension().to_lower() in STAGED_EXTS
+			or path.get_extension().to_lower() in A2GThumbs.IMAGE_EXTS) \
+			and not path.contains("::"):
+		_thumbs.request({"card": card, "path": path, "res": a.get("res")}, path)
+		return
 	var previewer := EditorInterface.get_resource_previewer()
 	if previewer == null:
 		return
@@ -360,6 +377,28 @@ func _request_preview(a: Dictionary, card: Control) -> void:
 		previewer.queue_edited_resource_preview(a["res"], self, "_on_preview", card)
 	elif a["path"].begins_with("res://"):
 		previewer.queue_resource_preview(a["path"], self, "_on_preview", card)
+
+
+const STAGED_EXTS := ["tres", "res", "tscn", "scn", "glb", "gltf", "fbx"]
+
+
+func _on_thumbs_rendered(payload, tex: Texture2D) -> void:
+	if payload is Dictionary and is_instance_valid(payload.get("card")):
+		A2GUI.set_card_thumb(payload["card"], tex)
+
+
+## Nothing renderable came out of the rig — the native queue takes the
+## same resource/path as it would have gotten anyway.
+func _on_thumbs_failed(payload, path: String) -> void:
+	if not (payload is Dictionary) or not is_instance_valid(payload.get("card")):
+		return
+	var previewer := EditorInterface.get_resource_previewer()
+	if previewer == null:
+		return
+	if payload.get("res") is Resource:
+		previewer.queue_edited_resource_preview(payload["res"], self, "_on_preview", payload["card"])
+	elif path.begins_with("res://"):
+		previewer.queue_resource_preview(path, self, "_on_preview", payload["card"])
 
 
 func _on_preview(_path: String, preview: Texture2D, thumbnail_preview: Texture2D, card) -> void:

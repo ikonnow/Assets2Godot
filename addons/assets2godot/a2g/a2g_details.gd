@@ -150,8 +150,9 @@ func _footer_button(footer: HBoxContainer, text: String, on_pressed: Callable) -
 
 ## Show [param entry] — the browser list's {path, kind, provider, ext}
 ## dict (scene-assets entries may add "res"/"node"). [param thumb] is
-## the tile's own texture; image files get a full-res "Original" frame
-## decoded next to it, which gives the strip its second button.
+## the tile's own texture and only shows when nothing better exists:
+## image files decode the full-res "Original" instead, so the strip
+## never ends up holding two copies of the same picture.
 func show_asset(entry: Dictionary, thumb: Texture2D = null) -> void:
 	asset = entry
 	var path := str(entry.get("path", ""))
@@ -174,6 +175,9 @@ func show_asset(entry: Dictionary, thumb: Texture2D = null) -> void:
 		var abs_path := ProjectSettings.globalize_path(path) \
 			if path.begins_with("res://") else path
 		if img.load(abs_path) == OK:
+			# The full-res frame replaces the tile's thumb — two frames
+			# of the same picture are a duplicate, not a strip.
+			_textures.erase("tile")
 			_textures["full"] = ImageTexture.create_from_image(img)
 			_set_frame("full")
 	_rebuild_strip()

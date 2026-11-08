@@ -110,10 +110,30 @@ func setup_a2g(title: String, badge: String, type_icon: String, tip: String, pay
 
 
 ## Assets2Godot: a thumbnail texture set directly instead of the decoded
-## BlendKit image paths.
-func set_thumb_texture(texture: Texture2D) -> void:
+## BlendKit image paths. Remote sources arrive in ANY aspect (Polyhaven
+## thumbs are the native render aspect: 77x256 ladders, 1:1 material
+## spheres) and edge-to-edge, while BK thumbs carry ~16px of background
+## margin baked into the image itself. Default: CENTERED letterboxes
+## every aspect without cropping, and the one-time Thumb inset restores
+## BK's padding as real space (badge/track ride along as Thumb
+## children). [param fill] opts a card back into upstream's edge-to-edge
+## COVERED look — for sources composed for it (HDRI pano previews).
+const A2G_THUMB_PAD := 16.0
+var _thumb_inset := false
+
+func set_thumb_texture(texture: Texture2D, fill: bool = false) -> void:
 	_shown = "a2g"
-	thumb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	if fill:
+		thumb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	else:
+		if not _thumb_inset:
+			_thumb_inset = true
+			var pad := int(A2G_THUMB_PAD * EditorInterface.get_editor_scale())
+			thumb.offset_left += pad
+			thumb.offset_right -= pad
+			thumb.offset_top += pad
+			thumb.offset_bottom -= pad
+		thumb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	thumb.texture = texture
 
 
