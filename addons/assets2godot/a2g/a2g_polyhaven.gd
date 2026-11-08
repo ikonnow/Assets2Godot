@@ -13,7 +13,7 @@ const PhMenuButton = preload("res://addons/assets2godot/a2g/a2g_ph_menu_button.g
 const PhDetails = preload("res://addons/assets2godot/a2g/a2g_ph_details.gd")
 
 ## Editor setting holding the absolute download target dir. "" = auto:
-## a local_dir root named like *polyhaven*, else res://polyhaven_assets.
+## a local_dir root named like *polyhaven*, else res://Assets2Godot/polyhaven.
 const SETTING_DIR := "assets2godot/polyhaven_dir"
 ## Rendered-cards cap: the API returns whole type lists (~1k each);
 ## sorted by download_count the cap keeps the popular end.
@@ -725,8 +725,9 @@ func _target_dir() -> String:
 		var dir := str(es.get_setting(SETTING_DIR))
 		if not dir.is_empty():
 			return dir
-	# own root beside bk_assets — globalized so _dl_dest stays absolute
-	return ProjectSettings.globalize_path("res://polyhaven_assets")
+	# own root under the shared Assets2Godot folder beside bk_assets —
+	# globalized so _dl_dest stays absolute
+	return ProjectSettings.globalize_path("res://Assets2Godot/polyhaven")
 
 
 ## The downloaded folder for the tile's reveal action — _dl_state_for's

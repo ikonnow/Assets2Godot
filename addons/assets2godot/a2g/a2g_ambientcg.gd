@@ -22,7 +22,7 @@ const AcgMenuButton = preload("res://addons/assets2godot/a2g/a2g_acg_menu_button
 const AcgDetails = preload("res://addons/assets2godot/a2g/a2g_acg_details.gd")
 
 ## Editor setting holding the absolute download target dir. "" = auto:
-## a local_dir root named like *ambientcg*, else res://ambientcg_assets.
+## a local_dir root named like *ambientcg*, else res://Assets2Godot/ambientcg.
 const SETTING_DIR := "assets2godot/ambientcg_dir"
 ## Rendered-cards cap: the full catalog is ~3k assets; the cap keeps the
 ## popular end (default sort) while PAGE_SIZE fetches stay cheap.
@@ -880,8 +880,9 @@ func _target_dir() -> String:
 		var dir := str(es.get_setting(SETTING_DIR))
 		if not dir.is_empty():
 			return dir
-	# own root beside bk_assets — globalized so _dl_dest stays absolute
-	return ProjectSettings.globalize_path("res://ambientcg_assets")
+	# own root under the shared Assets2Godot folder beside bk_assets —
+	# globalized so _dl_dest stays absolute
+	return ProjectSettings.globalize_path("res://Assets2Godot/ambientcg")
 
 
 ## The downloaded folder for the tile's reveal action — _dl_state_for's
