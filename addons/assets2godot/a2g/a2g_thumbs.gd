@@ -2,21 +2,25 @@
 extends Node
 ## On-demand thumbnail renderer for asset files the EditorResourcePreview
 ## can't reach — anything outside res:// (vault caches, local roots).
-## Images are decoded then run through queue_edited_resource_preview for
-## editor-identical output; .tres/.tscn resources load and stage; .glb/
-## .gltf go through GLTFDocument, .fbx through FBXDocument (4.3+). Staged
-## content renders in a hidden SubViewport using the same rig the engine's
-## own preview plugins (EditorMeshPreviewPlugin & co.) use: transparent
-## background, fov-45 camera at z=3, key light + 0.7-gray fill, AABB
-## normalized to 0.5 units, rounded corners r=min/32.
+## Images are decoded and fit at card size; .tres/.tscn resources load
+## and stage; .glb/.gltf go through GLTFDocument, .fbx through
+## FBXDocument (4.3+). Staged content renders in a hidden SubViewport
+## using the same rig the engine's own preview plugins
+## (EditorMeshPreviewPlugin & co.) use: transparent background, fov-45
+## camera at z=3, key light + 0.7-gray fill, AABB normalized to 0.5
+## units, rounded corners r=min/32 — rendered at 2× and downscaled,
+## the same supersample the engine applies (128 → 64).
 ##
 ## Rendered thumbs persist to <editor cache>/a2g/thumbs/<md5(path)>-<size>
 ## .png + .json {mtime, md5} — the editor's own resthumb invalidation
 ## scheme — so each file renders exactly once per content change.
 ##
 ## Usage: thumbs.request(payload, "/abs/path.glb") -> rendered(payload, tex)
+## or failed(payload, path) when nothing renderable came out — callers
+## fall back to the native preview queue on `failed`.
 
 signal rendered(payload: Variant, texture: Texture2D)
+signal failed(payload: Variant, path: String)
 
 const DEFAULT_SIZE := 256
 const SETTING_SIZE := "assets2godot/thumb_size"
@@ -42,11 +46,15 @@ func _ready() -> void:
 	# Render size is an editor setting (Settings → Assets2Godot → Thumb
 	# size); a missing value means this code ran outside the plugin.
 	_size = DEFAULT_SIZE
-	var es := EditorInterface.get_editor_settings()
-	if es and es.has_setting(SETTING_SIZE):
-		_size = int(es.get_setting(SETTING_SIZE))
+	if Engine.is_editor_hint():
+		var es := EditorInterface.get_editor_settings()
+		if es and es.has_setting(SETTING_SIZE):
+			_size = int(es.get_setting(SETTING_SIZE))
 	_viewport = SubViewport.new()
-	_viewport.size = Vector2i(_size, _size)
+	# Render at 2× and downscale in _finish — the engine supersamples its
+	# previews the same way (renders 128, ships 64), which is what makes
+	# the native thumbs look smooth. Rendering 1:1 left visible jaggies.
+	_viewport.size = Vector2i(_size * 2, _size * 2)
 	_viewport.own_world_3d = true
 	_viewport.transparent_bg = true   # editor rig: transparent, no env
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
@@ -108,40 +116,21 @@ func _process(_delta: float) -> void:
 			var img := _render_path(path)
 			if img != null:
 				_finish(path, img, item["payload"])
+			else:
+				failed.emit(item["payload"], path)
 	if _queue.is_empty():
 		set_process(false)
 
 
-## Image files: decode, then hand the texture to the editor previewer —
-## it produces the native fit-in-box + rounded corners + small preview on
-## its thread. Falls back to a self-processed image when the previewer is
-## unavailable or returns null.
+## Image files: decode and finish directly at card size — the edited
+## previewer would have fit them natively too, but only at 64px.
 func _handle_image(item: Dictionary) -> void:
 	var path: String = item["path"]
 	var img := _decode_image(path)
 	if img == null:
+		failed.emit(item["payload"], path)
 		return
-	var previewer := EditorInterface.get_resource_previewer()
-	if previewer == null:
-		_finish(path, img, item["payload"])
-		return
-	_pending[path] = img
-	var tex := ImageTexture.create_from_image(img)
-	previewer.queue_edited_resource_preview(tex, self, "_on_edited_preview",
-			{"payload": item["payload"], "path": path})
-
-
-func _on_edited_preview(_cb_path: String, preview: Texture2D, _small: Texture2D, ud) -> void:
-	if not (ud is Dictionary):
-		return
-	var path: String = ud["path"]
-	var img: Image = _pending.get(path)
-	_pending.erase(path)
-	if preview != null:
-		# Engine output is already post-processed — persist as-is.
-		_finish_tex(path, preview, ud["payload"])
-	elif img != null:
-		_finish(path, img, ud["payload"])
+	_finish(path, img, item["payload"])
 
 
 func _decode_image(path: String) -> Image:
@@ -326,21 +315,19 @@ func _post_process(img: Image) -> void:
 					img.set_pixel(x, y, Color(0, 0, 0, 0))
 
 
-## Post-processes, persists and emits a staged/decoded Image.
+## Post-processes, persists and emits a staged/decoded Image. Every
+## image is brought down to _size on its long side first — the rig
+## renders at 2× (supersample) and decoded images can be huge — and
+## never upscaled, matching the native previews.
 func _finish(path: String, img: Image, payload: Variant) -> void:
+	var s := maxf(img.get_width(), img.get_height())
+	if s > _size:
+		img.resize(maxi(1, int(img.get_width() * _size / s)),
+			maxi(1, int(img.get_height() * _size / s)), Image.INTERPOLATE_LANCZOS)
 	_post_process(img)
 	_disk_store(path, img)
 	_cache_store(path, ImageTexture.create_from_image(img))
 	rendered.emit(payload, _cache[path])
-
-
-## Persists and emits an engine-rendered texture (already post-processed).
-func _finish_tex(path: String, tex: Texture2D, payload: Variant) -> void:
-	var img := tex.get_image()
-	if img != null:
-		_disk_store(path, img)
-	_cache_store(path, tex)
-	rendered.emit(payload, tex)
 
 
 func _cache_store(path: String, tex: Texture2D) -> void:
@@ -355,6 +342,8 @@ func _cache_store(path: String, tex: Texture2D) -> void:
 ## (equal → refresh sidecar, different → regen).
 
 func _disk_root() -> String:
+	if not Engine.is_editor_hint():
+		return ""
 	var ep := EditorInterface.get_editor_paths()
 	if ep == null or not ep.has_method("get_cache_dir"):
 		return ""
@@ -377,6 +366,10 @@ func _disk_lookup(path: String) -> Texture2D:
 		return null
 	var meta: Variant = JSON.parse_string(FileAccess.get_file_as_string(dp[1]))
 	if not (meta is Dictionary):
+		return null
+	# Entries written before the supersample pass carry no "render" tag —
+	# regenerate them instead of serving soft 1:1 renders.
+	if int(meta.get("render", -1)) != _size * 2:
 		return null
 	if int(meta.get("mtime", -1)) != FileAccess.get_modified_time(path):
 		if str(meta.get("md5", "")) != FileAccess.get_md5(path):
@@ -403,5 +396,6 @@ func _disk_write_meta(meta_path: String, src_path: String) -> void:
 		f.store_string(JSON.stringify({
 			"mtime": FileAccess.get_modified_time(src_path),
 			"md5": FileAccess.get_md5(src_path),
+			"render": _size * 2,
 		}))
 		f.close()
