@@ -25,6 +25,8 @@ const SETTING_A2G_VIEW = "assets2godot/browser_view"
 const SETTING_A2G_THUMB_SIZE = "assets2godot/thumb_size"
 const SETTING_A2G_SCENE_CAP = "assets2godot/scene_resource_cap"
 const SETTING_A2G_SHOW_FILES = "assets2godot/show_all_files"
+# Per-provider tab visibility — "assets2godot/providers/<key>_enabled".
+const SETTING_A2G_PROVIDER = "assets2godot/providers/%s_enabled"
 # Older keys moved to the settings above.
 const OLD_SETTINGS = {"blendkit/model_format": SETTING_MODEL_FORMAT, "blendkit/resolution": SETTING_RESOLUTION}
 # Godot's enum hints can't hold an empty value, so Auto resolution "" is stored as this.
@@ -42,6 +44,7 @@ const A2GBrowser = preload("res://addons/assets2godot/a2g/a2g_browser.gd")
 const A2GContextPlugin = preload("res://addons/assets2godot/a2g/a2g_context_plugin.gd")
 const A2GPolyhaven = preload("res://addons/assets2godot/a2g/a2g_polyhaven.gd")
 const A2GAmbientcg = preload("res://addons/assets2godot/a2g/a2g_ambientcg.gd")
+const A2GSettingsButton = preload("res://addons/assets2godot/a2g/a2g_settings_button.gd")
 const Auth = preload("res://addons/assets2godot/auth.gd")
 const BlenderImport = preload("res://addons/assets2godot/blender_import.gd")
 const ClientBinary = preload("res://addons/assets2godot/client_binary.gd")
@@ -130,6 +133,20 @@ var _a2g_dock: A2GDock
 var _ctx_fs: EditorContextMenuPlugin
 var _ctx_scene: EditorContextMenuPlugin
 
+## The remote provider tabs in display order — "blendkit" is the
+## daemon-backed upstream gallery, the rest are in-plugin HTTP providers
+## (spec §3). Everything that lists providers — TabBar icons, the Sources
+## tree's remote rows, the settings menu's switches — shares this
+## registry; a new provider appends its key and registers its pane with
+## the same `_add_tab_pane(panes, pane, key)` call.
+const PROVIDERS := [
+	{"key": "blendkit", "title": "BlendKit", "daemon": true},
+	{"key": "polyhaven", "title": "Polyhaven", "daemon": false},
+	{"key": "ambientcg", "title": "ambientCG", "daemon": false},
+]
+## key → pane, filled by _add_tab_pane as each provider pane registers.
+var _provider_panes := {}
+
 
 func _enter_tree() -> void:
 	init_settings()
@@ -172,6 +189,7 @@ func _exit_tree() -> void:
 		a2g_pane = null
 		_tab_bar = null
 		_tab_panes = []
+		_provider_panes = {}
 		_a2g_button = null
 		_a2g_dock = null
 		gallery = null
@@ -229,6 +247,13 @@ func init_gallery() -> void:
 	if _tab_bar.has_signal(&"tab_clicked"):
 		_tab_bar.connect(&"tab_clicked", func(_i): select_tab(_tab_bar.current_tab))
 	header.add_child(VSeparator.new())
+	# The plugin-wide menu left of the A2G toggle: provider switches,
+	# A2G fine-tuning, Settings, links and the release check — same
+	# dots-button mechanics the provider search rows use.
+	var a2g_menu := A2GSettingsButton.new()
+	a2g_menu.name = "A2GMenu"
+	header.add_child(a2g_menu)
+	a2g_menu.setup(self)
 	_a2g_button = Button.new()
 	_a2g_button.name = "A2GToggle"
 	_a2g_button.text = "A2G"
@@ -303,7 +328,7 @@ func init_gallery() -> void:
 	gallery = gallery_scene.instantiate()
 	gallery.plugin = self
 	gallery.name = "BlendKit"
-	_add_tab_pane(panes, gallery)
+	_add_tab_pane(panes, gallery, "blendkit")
 	# Right-click quick download on BlendKit cards too — the same compact
 	# tile remote-provider cards get, installed without upstream edits.
 	A2GUI.install_bk_quick_download(get_tree(), gallery)
@@ -312,19 +337,17 @@ func init_gallery() -> void:
 	var polyhaven := A2GPolyhaven.new()
 	polyhaven.plugin = self
 	polyhaven.name = "Polyhaven"
-	_add_tab_pane(panes, polyhaven)
+	_add_tab_pane(panes, polyhaven, "polyhaven")
 	# ambientCG: second pure-GDScript provider — public v3 API, all-CC0
 	# catalog, downloads are extracted zip archives.
 	var ambientcg := A2GAmbientcg.new()
 	ambientcg.plugin = self
 	ambientcg.name = "ambientCG"
-	_add_tab_pane(panes, ambientcg)
+	_add_tab_pane(panes, ambientcg, "ambientcg")
 	main_screen.hide()
 	EditorInterface.get_editor_main_screen().add_child(main_screen)
-	# Provider tabs stay text-only — icon noise in the tab row was
-	# deliberately removed before; the A2G toggle on the right carries
-	# the FileSystem dock's own icon instead, reading "opens the file
-	# organization panel" rather than a logo mark.
+	# The A2G toggle on the right carries the FileSystem dock's own icon,
+	# reading "opens the file organization panel" rather than a logo mark.
 	for icon_name in [&"Filesystem", &"Folder"]:
 		var ic := main_screen.get_theme_icon(icon_name, "EditorIcons")
 		if ic:
@@ -335,19 +358,102 @@ func init_gallery() -> void:
 	var accent := main_screen.get_theme_color(&"accent_color", &"Editor")
 	_a2g_button.add_theme_color_override("font_pressed_color", accent)
 	_a2g_button.add_theme_color_override("font_hover_pressed_color", accent)
-	_tab_bar.current_tab = 0
-	_show_tab(0)
+	# A provider switched off in the settings menu starts hidden — the
+	# first visible tab is the startup selection, not hardcoded tab 0.
+	var first := _first_enabled_tab()
+	_tab_bar.current_tab = first
+	_show_tab(first)
 
 
 ## Registers [param pane] as a full-rect stack pane plus a TabBar tab
-## titled with the pane's name. Returns the tab index.
-func _add_tab_pane(panes: Control, pane: Control) -> int:
+## titled with the pane's name. A provider [param key] puts the pane in
+## the provider registry (Sources rows, settings switches) and honors a
+## stored tab-off setting. Tabs stay text-only — the provider logos live
+## in the Sources rows and the settings menu instead.
+## Returns the tab index.
+func _add_tab_pane(panes: Control, pane: Control, key := "") -> int:
 	pane.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	pane.hide()
 	panes.add_child(pane)
 	_tab_panes.append(pane)
 	_tab_bar.add_tab(pane.name)
-	return _tab_bar.tab_count - 1
+	var idx := _tab_bar.tab_count - 1
+	if key != "":
+		_provider_panes[key] = pane
+		# The registry's mark on the tab itself — same logo the Sources
+		# row and the settings menu show, so a provider reads identically
+		# on every surface.
+		var icon := A2GUI.provider_icon(key)
+		if icon != null:
+			_tab_bar.set_tab_icon(idx, icon)
+		if not provider_enabled(key):
+			_set_tab_visible(idx, false)
+	return idx
+
+
+## Whether provider [param key]'s tab is on — the settings menu's
+## switches and the providers' own catalog gates share this answer.
+func provider_enabled(key: String) -> bool:
+	var es := EditorInterface.get_editor_settings()
+	var setting := SETTING_A2G_PROVIDER % key
+	if es and es.has_setting(setting):
+		return bool(es.get_setting(setting))
+	return true
+
+
+## The pane registered under provider [param key], or null — the Sources
+## tree's remote rows and the A2G downloads surface find their provider
+## this way.
+func provider_pane(key: String) -> Control:
+	return _provider_panes.get(key)
+
+
+## Switch a provider tab on/off from the settings menu. Off = hidden tab
+## + hidden pane; a daemon provider's Client keeps running regardless
+## (the A2G index needs it) and an in-plugin provider simply never
+## fetches — its gate in _reload() covers late calls too.
+func set_provider_enabled(key: String, enabled: bool) -> void:
+	var pane: Control = _provider_panes.get(key)
+	if pane == null:
+		return
+	var es := EditorInterface.get_editor_settings()
+	if es:
+		es.set_setting(SETTING_A2G_PROVIDER % key, enabled)
+	var idx := _tab_panes.find(pane)
+	if idx < 0:
+		return
+	_set_tab_visible(idx, enabled)
+	if not enabled:
+		pane.hide()
+		if _tab_bar.current_tab == idx:
+			var next := _first_enabled_tab()
+			if next >= 0:
+				select_tab(next)
+			else:
+				_show_tab(-1)
+
+
+## Hidden when the API allows it, merely disabled on Godot versions
+## without TabBar.set_tab_hidden — either way the tab stops offering
+## the pane.
+func _set_tab_visible(idx: int, visible_tab: bool) -> void:
+	if _tab_bar.has_method("set_tab_hidden"):
+		_tab_bar.set_tab_hidden(idx, not visible_tab)
+	else:
+		_tab_bar.set_tab_disabled(idx, not visible_tab)
+
+
+func _tab_shown(idx: int) -> bool:
+	if _tab_bar.has_method("is_tab_hidden"):
+		return not _tab_bar.is_tab_hidden(idx)
+	return not _tab_bar.is_tab_disabled(idx)
+
+
+func _first_enabled_tab() -> int:
+	for i in _tab_panes.size():
+		if _tab_shown(i):
+			return i
+	return -1
 
 
 ## Shows TabBar tab [param idx] and closes the A2G overlay. Bound to the
@@ -362,7 +468,7 @@ func _show_tab(idx: int) -> void:
 
 
 func select_tab(idx: int) -> void:
-	if idx < 0 or idx >= _tab_panes.size():
+	if idx < 0 or idx >= _tab_panes.size() or not _tab_shown(idx):
 		return
 	_tab_bar.current_tab = idx
 	_show_tab(idx)
@@ -500,6 +606,8 @@ func init_settings() -> void:
 	add_editor_setting(SETTING_A2G_THUMB_SIZE, 256, PROPERTY_HINT_ENUM, "128,256,512")
 	add_editor_setting(SETTING_A2G_SCENE_CAP, 300, PROPERTY_HINT_RANGE, "50,2000,50")
 	add_editor_setting(SETTING_A2G_SHOW_FILES, false)
+	for p in PROVIDERS:
+		add_editor_setting(SETTING_A2G_PROVIDER % str(p.get("key", "")), true)
 	# After registering, so migrated defaults aren't written to project.godot.
 	for old in OLD_SETTINGS:
 		if ProjectSettings.has_setting(old):
