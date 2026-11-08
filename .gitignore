@@ -5,12 +5,15 @@
 /client-dist
 # client binaries (built on-demand)
 /addons/assets2godot/client
-# downloaded assets — each provider gets its own res://<name>_assets root
+# downloaded assets — bk_assets is BlendKit's; a2g providers share
+# res://Assets2Godot/<provider>/, so every child dir is a download
+# root except the tracked test/ stage
 /bk_assets
-/polyhaven_assets
-/ambientcg_assets
-# provider download-test fixtures (test_provider_downloads.gd → test/main_test.tscn)
-/test/downloads/
+/Assets2Godot/*/
+!/Assets2Godot/test/
+# provider download-test fixtures (test_provider_downloads.gd →
+# Assets2Godot/test/main_test.tscn)
+/Assets2Godot/test/downloads/
 # godot-ai MCP addon (user-installed editor tooling, not ours)
 /addons/godot_ai
 /out
