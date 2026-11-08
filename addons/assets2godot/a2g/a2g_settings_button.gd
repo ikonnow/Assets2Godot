@@ -20,7 +20,7 @@ const RELEASES_API := "https://api.github.com/repos/ikonnow/Assets2Godot/release
 const A2G_DIR := "res://Assets2Godot"
 
 enum Item { SETTINGS, OPEN_DIR, UPDATE, UPDATE_STATUS, SOURCES, ISSUES,
-	VERSION, SHOW_FILES }
+	VERSION, SHOW_FILES, TAB_LOGOS }
 ## Provider check items get consecutive ids from this base — index into
 ## plugin.PROVIDERS maps back to the provider entry.
 const PROVIDER_BASE := 100
@@ -29,6 +29,7 @@ const SCENE_CAPS := [50, 150, 300, 600, 1000]
 const SETTING_THUMB := "assets2godot/thumb_size"
 const SETTING_CAP := "assets2godot/scene_resource_cap"
 const SETTING_FILES := "assets2godot/show_all_files"
+const SETTING_TAB_LOGOS := "assets2godot/tab_logos"
 
 var plugin: EditorPlugin
 
@@ -116,6 +117,12 @@ func _fill_menu() -> void:
 		_menu.set_item_tooltip(-1, "Show the %s tab.%s" % [p.get("title", key),
 			" The Client keeps running — the A2G index needs it." if daemon else \
 			" Its catalog never fetches while off."])
+	# Opt-in provider marks inside the tabs themselves — off keeps the
+	# strip text-only like the editor's own tabs.
+	_menu.add_icon_check_item(get_theme_icon("TabBar", "EditorIcons"),
+		"Provider logos in tabs", Item.TAB_LOGOS)
+	_menu.set_item_checked(-1, plugin.tab_logos_enabled())
+	_menu.set_item_tooltip(-1, "Show each provider's logo in its main tab — off keeps tabs text-only.")
 	_menu.add_separator("Assets2Godot")
 	for i in THUMB_SIZES.size():
 		_thumb_menu.add_radio_check_item("%d px" % THUMB_SIZES[i], i)
@@ -187,6 +194,8 @@ func _on_id_pressed(id: int) -> void:
 	match id:
 		Item.SHOW_FILES:
 			_set_es(SETTING_FILES, not bool(_es(SETTING_FILES, false)))
+		Item.TAB_LOGOS:
+			plugin.set_tab_logos(not plugin.tab_logos_enabled())
 		Item.OPEN_DIR:
 			EditorInterface.get_file_system_dock().navigate_to_path(A2G_DIR)
 		Item.SETTINGS:
