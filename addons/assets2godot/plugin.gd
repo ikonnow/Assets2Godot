@@ -29,9 +29,9 @@ const SETTING_A2G_SHOW_FILES = "assets2godot/show_all_files"
 const SETTING_A2G_PROVIDER = "assets2godot/providers/%s_enabled"
 # Opt-in provider logos inside the tabs — off keeps them text-only.
 const SETTING_A2G_TAB_LOGOS = "assets2godot/tab_logos"
-# Tab logo render size — just under the 16px icon_max_width cap so the
-# mark keeps breathing room inside its slot, like editor icons' padding.
-const TAB_LOGO_PX := 14.0
+# Tab logo render size — the editor's 16px glyph grid, capped per tab
+# via set_tab_icon_max_width so wide marks can't stretch the tab.
+const TAB_LOGO_PX := 16.0
 # Older keys moved to the settings above.
 const OLD_SETTINGS = {"blendkit/model_format": SETTING_MODEL_FORMAT, "blendkit/resolution": SETTING_RESOLUTION}
 # Godot's enum hints can't hold an empty value, so Auto resolution "" is stored as this.
