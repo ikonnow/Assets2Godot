@@ -97,6 +97,26 @@ static func web_url(slug: String) -> String:
 	return "https://ambientcg.com/a/%s" % slug.uri_encode()
 
 
+## Redirect Locations arrive RAW — e.g. `…/3^Additional Maps/x.zip`
+## with a real space and `^`, which HTTPRequest/HTTPClient refuse.
+## Encode each path segment (decode-first so already-escaped inputs
+## stay stable); host, scheme and query pass through untouched.
+static func encode_url(url: String) -> String:
+	var q := url.split("?", true, 1)
+	var base := str(q[0])
+	var rest := base.split("//", true, 1)
+	var host_path := str(rest[1] if rest.size() > 1 else base)
+	var slash := host_path.find("/")
+	if slash < 0:
+		return url
+	var segs := host_path.substr(slash).split("/")
+	for i in segs.size():
+		segs[i] = segs[i].uri_decode().uri_encode()
+	var out := (str(rest[0]) + "//" if rest.size() > 1 else "") \
+		+ host_path.left(slash) + "/".join(segs)
+	return out + ("?" + str(q[1]) if q.size() > 1 else "")
+
+
 ## Filename for a download URL: the real name lives in the `?file=` query
 ## param (ambientcg.com/get?file=<name>.zip), so url.get_file() alone
 ## would wrongly answer "get".

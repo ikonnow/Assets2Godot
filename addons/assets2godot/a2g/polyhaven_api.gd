@@ -21,6 +21,19 @@ const TYPE_DIRS := {"model": "models", "texture": "textures", "hdri": "hdris"}
 ## Preferred formats for the download dialog — the top-ranked one offers
 ## the suggested option. gltf imports natively, hdr for skyboxes.
 const PREFERRED_FORMATS := ["gltf", "hdr", "zip", "blend", "fbx", "usd", "exr"]
+## Single-map file types the /files tree lists as their own formats —
+## the site's pick-one-map rows. For texture assets they regroup into
+## set options ("JPG 2K" = every map at that res+ext in one download),
+## like ambientCG's whole-set zips: the plugin's download is always the
+## whole asset.
+const MAP_FORMATS := ["diffuse", "nor_gl", "nor_dx", "rough", "ao", "disp",
+	"displacement", "arm", "metal", "opacity", "bump", "nor", "spec",
+	"scol", "mask", "roughmetal", "ao_rough_metal"]
+## Source-material files Godot can't use — the same call ambientCG's
+## extractor makes for .mtlx inside its zips.
+const SKIP_FORMATS := ["mtlx"]
+## Ext order inside the synthesized set rows — jpg first like ambientCG.
+const SET_EXT_ORDER := ["jpg", "jpeg", "png", "exr", "hdr", "webp", "tga"]
 ## Resolution keys low→high for option ordering and the default pick.
 const RES_ORDER := ["512", "1k", "2k", "4k", "8k", "16k", "24k"]
 ## Sort options like the site's own list: [id, label]. "hot" is the
@@ -242,6 +255,42 @@ static func flatten_files(tree: Variant) -> Array:
 					"includes": includes,
 					"_rank": [fi if fi >= 0 else 99, _res_rank(str(res))],
 				})
+	# Single maps regroup into whole-set options like ambientCG's zips:
+	# "JPG 2K" downloads every map at that res+ext (primary + includes).
+	var sets := {}
+	for o in out:
+		var parts := str(o.get("key", "")).split("/")
+		if parts.size() < 3 or parts[0].to_lower() not in MAP_FORMATS:
+			continue
+		var k := "%s/%s" % [parts[1], parts[2].to_lower()]
+		if not sets.has(k):
+			sets[k] = []
+		sets[k].append(o)
+	out = out.filter(func(o):
+		var fmt := str(o.get("key", "")).split("/")[0].to_lower()
+		return fmt not in MAP_FORMATS and fmt not in SKIP_FORMATS)
+	for k in sets:
+		var group: Array = sets[k]
+		var first: Dictionary = group[0]
+		var inc := {}
+		var total := int(first.get("size", 0))
+		for o in group.slice(1):
+			var rel := file_basename(str(o.get("url", "")))
+			if rel.is_empty() or inc.has(rel):
+				continue
+			inc[rel] = str(o.get("url", ""))
+			total += int(o.get("size", 0))
+		var parts := str(k).split("/")
+		out.append({
+			"key": "set/%s" % k,
+			"label": "%s %s (%s)" % [parts[1].to_upper(), parts[0].to_upper(),
+				short_size(total)],
+			"url": str(first.get("url", "")),
+			"size": int(first.get("size", 0)),
+			"total_size": total,
+			"includes": inc,
+			"_rank": [-1, _res_rank(parts[0]), SET_EXT_ORDER.find(parts[1])],
+		})
 	out.sort_custom(func(a, b): return a._rank < b._rank)
 	for o in out:
 		o.erase("_rank")

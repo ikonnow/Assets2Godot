@@ -56,10 +56,9 @@ func _ready() -> void:
 	_panes.add_child(left)
 	_frame = PanelContainer.new()
 	_frame.clip_contents = true
-	var mask := StyleBoxFlat.new()
-	mask.bg_color = Color.WHITE
-	mask.set_corner_radius_all(int(8 * edscale))
-	_frame.add_theme_stylebox_override("panel", mask)
+	# No panel override: asset_details' PreviewFrame is a plain
+	# PanelContainer — the theme's own dark panel shows through the
+	# image's transparent margins, never a white box.
 	left.add_child(_frame)
 	_preview = TextureRect.new()
 	_preview.custom_minimum_size = Vector2.ONE * 400 * edscale

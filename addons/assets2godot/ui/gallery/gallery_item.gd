@@ -133,6 +133,18 @@ func set_thumb_texture(texture: Texture2D, fill: bool = false) -> void:
 			thumb.offset_right -= pad
 			thumb.offset_top += pad
 			thumb.offset_bottom -= pad
+			# Thumb-anchored chrome still belongs on the CARD's edge, not
+			# the letterboxed image edge: upstream parks the downloaded
+			# check and the progress track at the clip's corner/bottom.
+			# The icon anchors to the thumb's RIGHT edge (moved left by
+			# the inset) so it compensates +pad; its top offsets and the
+			# bottom-anchored track compensate -/+pad respectively.
+			downloaded_icon.offset_left += pad
+			downloaded_icon.offset_right += pad
+			downloaded_icon.offset_top -= pad
+			downloaded_icon.offset_bottom -= pad
+			download_track.offset_top += pad
+			download_track.offset_bottom += pad
 		thumb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	thumb.texture = texture
 
