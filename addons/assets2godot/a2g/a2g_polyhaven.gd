@@ -123,8 +123,8 @@ func _ready() -> void:
 	_type = _foption(fbar, "Type:", "Filter by asset type.", PhApi.TYPE_OPTIONS,
 		func(_i): _reload())
 	_cat_btn = _foption(fbar, "Category:",
-		"Filter by category — the real taxonomy from api.polyhaven.com.", [],
-		func(_i): _rebuild())
+		"Filter by category — the real taxonomy from api.polyhaven.com.",
+		[["All", ""]], func(_i): _rebuild())
 	# Same width discipline as BK's CategoryOption: never fit the longest
 	# item's width — category names run long ("Natural Light (822)").
 	_cat_btn.clip_text = true
@@ -138,6 +138,9 @@ func _ready() -> void:
 	# text-free, its own messages sit inside the scroll body.
 	_status = Label.new()
 	_status.clip_text = true
+	# Right-aligned + clip alone cuts the text's LEFT edge — ellipsis
+	# marks the overflow instead of silently losing "Showing 5".
+	_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	fbar.add_child(_status)
@@ -364,7 +367,9 @@ func _rebuild() -> void:
 		if shown >= PAGE_MAX:
 			continue
 		shown += 1
-		var card: Control = A2GUI.asset_card(str(a.get("name", "?")), str(a.get("type", "")),
+		# The chip mirrors BK's plan badge: the honest equivalent for an
+		# all-CC0 catalog is the license itself (type stays on filter/icon).
+		var card: Control = A2GUI.asset_card(str(a.get("name", "?")), "CC0",
 			"polyhaven", "", null, str(PhApi.TYPE_ICONS.get(a.get("type", ""), "File")),
 			{"remote_slug": slug, "remote_title": str(a.get("name", slug)),
 				"remote_url": PhApi.web_url(slug),
@@ -435,6 +440,13 @@ func _asset_by_slug(slug: String) -> Dictionary:
 
 # MARK: thumbnails
 
+## HDRI thumbs are 4:3 pano previews composed to fill — they keep the
+## edge-to-edge COVERED look; models/textures get the letterboxed inset.
+## (catalog type values are singular: "hdri"/"texture"/"model")
+func _thumb_fill(asset: Dictionary) -> bool:
+	return str(asset.get("type", "")) == "hdri"
+
+
 func _queue_thumb(asset: Dictionary) -> void:
 	var url := str(asset.get("thumbnail_url", ""))
 	if url.is_empty():
@@ -443,7 +455,7 @@ func _queue_thumb(asset: Dictionary) -> void:
 	if _thumb_cache.has(url):
 		var card: Control = _cards.get(slug)
 		if is_instance_valid(card):
-			card.call("set_thumb_texture", _thumb_cache[url])
+			card.call("set_thumb_texture", _thumb_cache[url], _thumb_fill(asset))
 		return
 	_thumb_queue.append(asset)
 	_pump_thumbs()
@@ -473,7 +485,7 @@ func _pump_thumbs() -> void:
 					_thumb_cache[url] = tex
 					var card: Control = _cards.get(slug)
 					if is_instance_valid(card):
-						card.call("set_thumb_texture", tex)
+						card.call("set_thumb_texture", tex, _thumb_fill(a))
 			_pump_thumbs())
 		if req.request(url, [PhApi.UA_HEADER]) != OK:
 			req.queue_free()
@@ -519,15 +531,22 @@ var _files_cache := {}
 
 ## Options for the quick tile: /files fetched once per asset, flattened
 ## to the picker's rows, answered with the resolution-preferred default.
+## The tile contract is {key,label,data} — remote_download hands .data
+## back, so the flatten entry nests inside it.
 func _remote_options_for(slug: String, cb: Callable) -> void:
+	var answer := func(options: Array):
+		var wrapped := []
+		for e in options:
+			wrapped.append({"key": str(e.get("key", "")),
+				"label": str(e.get("label", "?")), "data": e})
+		cb.call(wrapped, PhApi.pick_default(options, _res_hint))
 	if _files_cache.has(slug):
-		var cached: Array = _files_cache[slug]
-		cb.call(cached, PhApi.pick_default(cached, _res_hint))
+		answer.call(_files_cache[slug])
 		return
 	_fetch_url(PhApi.files_url(slug), func(text):
 		var options := PhApi.flatten_files(JSON.parse_string(text))
 		_files_cache[slug] = options
-		cb.call(options, PhApi.pick_default(options, _res_hint)))
+		answer.call(options))
 
 
 ## The tile's Download action — the chosen option is a flatten_files
@@ -641,7 +660,9 @@ func _dl_finish() -> void:
 	_status.text = "Downloaded %s → %s" % [str(_dl_asset.get("name", slug)), A2GUI.short_path(_dl_dest)]
 	if _details.visible and str(_details.asset.get("slug", "")) == slug:
 		_details.refresh_state()
-	if _dl_dest.begins_with("res://"):
+	# _dl_dest is absolute (absolute_download_path is globalized), so an
+	# in-project target compares against the globalized res:// root.
+	if _dl_dest.begins_with(ProjectSettings.globalize_path("res://")):
 		EditorInterface.get_resource_filesystem().scan()
 	elif _in_local_root(_dl_dest) and plugin.connection \
 			and plugin.connection.is_client_connected():
