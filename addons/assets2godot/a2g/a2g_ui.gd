@@ -256,17 +256,25 @@ static func quick_download(card: Control, entry: Dictionary) -> void:
 ## remote_* entry from the card's own asset dict. Self-disconnects when
 ## the gallery leaves the tree (plugin disabled).
 static func install_bk_quick_download(tree: SceneTree, gallery: Control) -> void:
-	var hook: Callable
-	hook = func(node: Node):
-		if not is_instance_valid(gallery):
-			if tree.node_added.is_connected(hook):
-				tree.node_added.disconnect(hook)
+	# Two lambda pitfalls avoided here: locals are captured by value, so a
+	# plain `hook` var would freeze the null it held at lambda creation
+	# (self-disconnect never works, the hook then errors on every
+	# node_added) — an Array cell carries a live view instead. And a
+	# freed `gallery` capture would log "capture was freed" on every
+	# invocation — a WeakRef turns that into a clean null check.
+	var gallery_ref := weakref(gallery)
+	var holder: Array = [Callable()]
+	holder[0] = func(node: Node):
+		if gallery_ref.get_ref() == null:
+			var h: Callable = holder[0]
+			if h.is_valid() and tree.node_added.is_connected(h):
+				tree.node_added.disconnect(h)
 			return
 		if node.get_script() != GalleryItemScript or node.has_meta(&"a2g_bk_quick"):
 			return
 		node.set_meta(&"a2g_bk_quick", true)
 		node.gui_input.connect(func(ev): _on_bk_card_input(node, ev, gallery))
-	tree.node_added.connect(hook)
+	tree.node_added.connect(holder[0])
 
 
 static func _on_bk_card_input(item: Control, ev: InputEvent, gallery: Control) -> void:
