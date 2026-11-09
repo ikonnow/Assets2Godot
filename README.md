@@ -17,6 +17,9 @@
     </a>
   </p>
   <p>
+    <video src="https://github.com/user-attachments/assets/ecf1e58e-9317-4378-b8a1-52f82ed53af1" width="844" controls muted></video>
+  </p>
+  <p>
     <img src="img/Assets2Godot_ambientCG.png" width="844"
       alt="Assets2Godot ambientCG tab — provider tabs, filter row and CC0 asset cards in the Godot editor">
   </p>
