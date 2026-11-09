@@ -5,12 +5,12 @@
 This fork continues the Blendkit for Godot lineage under the Assets2Godot
 name. Entries below `0.8.0` are upstream history, kept for reference.
 
-## 0.8.0 - unreleased
+## 0.8.0 - 2026-11-09
 
 First Assets2Godot release: the plugin becomes a multi-source asset
-workspace — local index browser, BlendKit tab and a new Polyhaven
-provider — on top of a forked `bk_client` daemon with provider/index
-endpoints.
+workspace — local index browser, BlendKit tab plus new Polyhaven and
+ambientCG providers — on top of a forked `bk_client` daemon with
+provider/index endpoints.
 
 ### Added
 
@@ -20,7 +20,24 @@ endpoints.
   into `res://imported_assets/<asset_name>/`.
 - **Polyhaven tab**: public CC0 catalog via in-plugin HTTP — provider
   filters/sorts, details popup with preview renders, one-click downloads
-  with `.part` staging and atomic rename.
+  with `.part` staging and atomic rename; whole-set texture options
+  ("JPG 2K" = every map at that res+ext).
+- **ambientCG tab**: Ambient CG's public CC0 library (materials, models,
+  HDRIs, brushes, atlases) as extracted ZIP sets, same pure-GDScript
+  provider pattern.
+- **Provider registry**: every remote provider gets a TabBar tab, a
+  Sources-tree row with a "Downloaded to project" child and an on/off
+  switch in the A2G menu (`assets2godot/providers/<key>_enabled`);
+  optional provider logos in tabs (`assets2godot/tab_logos`).
+- **Shared downloads surface**: `a2g_provider_downloads` renders each
+  provider's on-disk downloads as cards; downloaded state is disk state
+  and survives restarts.
+- **Post-download Godot adaptation** (`Conversions`): unreadable-EXR
+  resave via local Blender, `materials/` .blend → `.tres` +
+  `textures_*/`, `organize_materials`/`materialize_maps` for BlendKit's
+  layout, `.blend` keep-import guards.
+- **A2G settings menu**: provider switches, thumbnail size, scene cap,
+  settings dialog, links and a GitHub release check.
 - **Quick-download tile**: compact format-picker download surface on
   provider and BlendKit cards via the shared `remote_*` payload contract.
 - **A2G button**: organization surface entry point (overlay in progress).
@@ -36,7 +53,11 @@ endpoints.
 - `dev.py` builds against the `ikonnow/bk_client` fork; release archives
   are named `assets2godot_vX.Y.Z.zip`.
 - `bk_client` fork release pipeline supports unsigned builds
-  (`SIGNING_ENABLED` repo variable gates signing jobs).
+  (`SIGNING_ENABLED` repo variable gates signing jobs); the Windows 7
+  legacy target is dropped (Go 1.21+ deps can't build it anymore).
+- Download roots consolidated: every provider lands under
+  `res://Assets2Godot/<name>/`, including BlendKit at
+  `res://Assets2Godot/bk_assets/` (upstream: `res://bk_assets/`).
 
 ## Upstream history (Blendkit for Godot)
 
