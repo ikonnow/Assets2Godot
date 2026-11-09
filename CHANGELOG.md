@@ -48,7 +48,7 @@ provider/index endpoints.
 
 ### Changed
 
-- Plugin identity: name Assets2Godot, author Ingmar Konnow (based on
+- Plugin identity: name Assets2Godot, author ikonnow (Ingmar Konnow) (based on
   Blendkit for Godot by Jakub Ruzicka & Andreas Gajdosik), version 0.8.0.
 - `dev.py` builds against the `ikonnow/bk_client` fork; release archives
   are named `assets2godot_vX.Y.Z.zip`.

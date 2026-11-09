@@ -27,3 +27,6 @@ __pycache__
 
 # local MCP scratch helper + probe outputs
 /tests/_*
+
+# Playwright MCP session artifacts
+.playwright-mcp/
