@@ -2,8 +2,8 @@
   <h1 align="center">Assets2Godot</h1>
   <p>
     A community asset workspace for the Godot editor — browse, organize and
-    import assets from <strong>BlendKit</strong>, <strong>Polyhaven</strong>
-    and your own drives, without leaving the editor.
+    import assets from <strong>BlendKit</strong>, <strong>Polyhaven</strong>,
+    <strong>ambientCG</strong> and your own drives, without leaving the editor.
   </p>
   <p>
     <a href="https://github.com/ikonnow/Assets2Godot/releases/latest">
@@ -11,6 +11,9 @@
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/github/license/ikonnow/Assets2Godot?color=orange" alt="GPLv2">
+    </a>
+    <a href="https://ikonnow.itch.io/assets2godot">
+      <img src="https://img.shields.io/badge/itch.io-Assets2Godot-fa5c5c?logo=itchdotio&logoColor=white" alt="itch.io">
     </a>
   </p>
   <p>
@@ -90,7 +93,8 @@ The plugin is installed per Godot project.
 ### From a release ZIP
 
 Download `assets2godot_vX.Y.Z.zip` from
-[Releases](https://github.com/ikonnow/Assets2Godot/releases) (or
+[Releases](https://github.com/ikonnow/Assets2Godot/releases) or
+[itch.io](https://ikonnow.itch.io/assets2godot) (or
 [build](#building) your own):
 
 1. Extract the ZIP into your project root (where `project.godot` lives).
