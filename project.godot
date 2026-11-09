@@ -15,9 +15,9 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 [application]
 
 config/name="Assets2Godot"
-run/main_scene="uid://c4a1u7xuxq85e"
+;run/main_scene=""
 config/features=PackedStringArray("4.7", "GL Compatibility")
-config/icon="uid://5n2k0xbtnud2"
+;config/icon=""
 #config/icon="res://icon.svg"
 
 [blendkit]
