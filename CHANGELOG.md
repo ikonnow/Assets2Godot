@@ -5,6 +5,20 @@
 This fork continues the Blendkit for Godot lineage under the Assets2Godot
 name. Entries below `0.8.0` are upstream history, kept for reference.
 
+## 0.8.1 - 2026-11-10
+
+### Changed
+
+- **No bundled Client executables** (Godot Asset Store rule): the archive
+  ships `client/v<ver>/` metadata only. On first run the plugin downloads
+  the pinned `bk_client` release ZIP from GitHub, extracts this platform's
+  binary into the shared data dir, verifies it against the bundled
+  manifest's sha256 and launches it — new `DOWNLOADING` connection state
+  with progress in the Client status line. Subsequent runs reuse the
+  shared copy.
+- `dev.py build --no-client-binaries` produces the store-compliant
+  `assets2godot_vX.Y.Z_nobin.zip` archive variant.
+
 ## 0.8.0 - 2026-11-09
 
 First Assets2Godot release: the plugin becomes a multi-source asset

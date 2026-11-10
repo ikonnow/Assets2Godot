@@ -37,6 +37,12 @@ func find_packed() -> void:
 	else:
 		version = pick_highest_version(list_client_versions(_base_dir))
 	bin_path = ProjectSettings.globalize_path(_base_dir.path_join("v" + version).path_join(_bin_name))
+	if not FileAccess.file_exists(bin_path):
+		# Store builds ship no bundled executables — a previously fetched
+		# copy lives in the shared data dir instead.
+		var shared := ProjectSettings.globalize_path(get_client_data_dir().path_join("bin").path_join("v" + version).path_join(_bin_name))
+		if FileAccess.file_exists(shared):
+			bin_path = shared
 
 
 ## Starts the Client on [param port], logging to [param log_path]. Returns
@@ -47,7 +53,7 @@ func launch(port: String, server: String, log_path: String) -> String:
 	if not FileAccess.file_exists(bin_path):
 		_plugin.log_error("Client binary not found. The plugin cannot work without the Client :(")
 		_plugin.log_debug("Expected Client binary path: %s" % bin_path)
-		return "Client binary not found"
+		return "need_client_download"
 
 	DirAccess.make_dir_recursive_absolute(log_path.get_base_dir())
 	# Keep the log of a Client that stopped, e.g. crashed, as the new one
