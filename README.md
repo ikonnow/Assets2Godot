@@ -68,8 +68,8 @@ project is under active development — expect rough edges.
 | BlendKit tab (search/download/login/plans) | Working — upstream feature set |
 | Polyhaven provider (catalog, details, downloads) | Working — new in 0.8.0 |
 | Quick-download tile on asset cards | Working — new in 0.8.0 |
-| Organization overlay (collections, batch ops) | Planned — see `docs/plans/` |
-| Additional providers | Planned — see `docs/specs/remote-providers.md` |
+| Organization overlay (collections, batch ops) | Planned |
+| Additional providers | Planned |
 
 ## Providers
 
@@ -176,9 +176,6 @@ favorites, multi-select and batch import are being built — see
                      Web browser
 ```
 
-Design notes live in [`docs/specs/architecture.md`](docs/specs/architecture.md)
-and [`docs/specs/remote-providers.md`](docs/specs/remote-providers.md).
-
 ## Building
 
 Requires **Python 3**; `git` for client sources; **Go** only for
@@ -227,34 +224,13 @@ python dev.py           # all commands
 | `build-client` | Build only the Go client |
 | `build-plugin` | Install client binaries into the plugin |
 | `build-archive` | Create the distributable ZIP |
-| `test` | Run the pytest suite (headless Godot) |
-| `test-e2e` | Live end-to-end tests (needs network) |
-
-## Testing
-
-```sh
-pip install -r requirements-dev.txt
-python dev.py build
-python dev.py test          # pytest, parallel with pytest-xdist
-```
-
-Godot 4 must be on `PATH` as `godot`/`godot4` or via `GODOT`/`GODOT4`.
-E2E tests hit the live Blendkit site and need `BLENDERKIT_API_KEY` only
-for gated assets; `python dev.py test-e2e` runs them (Playwright Chromium
-required for the browser test).
-
-The `tests/test_*.gd` suites are MCP-driven and run inside a live editor
-with the godot-ai addon — they're dev tooling, not part of CI.
 
 ## Roadmap
 
 - **Organization overlay** — collections, favorites, multi-select and
-  batch import across providers (design:
-  [`docs/plans/2026-11-07-a2g-org-overlay.md`](docs/plans/2026-11-07-a2g-org-overlay.md)).
-- **More providers** — the provider contract is documented in
-  [`docs/specs/remote-providers.md`](docs/specs/remote-providers.md); a
-  step-by-step skill for adding one lives in
-  [`.devin/skills/add-asset-provider/`](.devin/skills/add-asset-provider/SKILL.md).
+  batch import across providers.
+- **More providers** — additional in-plugin HTTP catalogs on the
+  Polyhaven/ambientCG pattern.
 - **Client signing** — publish signed `bk_client` binaries once
   certificate secrets are configured in the fork.
 - **Godot Asset Store** listing once the release line stabilizes.
