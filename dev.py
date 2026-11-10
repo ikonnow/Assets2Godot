@@ -66,6 +66,7 @@ def build(
     client_dir=None,
     result_dir=RESULT_DIR,
     dist_dir=CLIENT_DIST_DIR,
+    no_client_binaries=False,
 ):
     """Build the Plugin and create archive.
 
@@ -88,7 +89,11 @@ def build(
         build_plugin(client_dir=client_dir)
     else:
         get_client_release(tag=tag, dist_dir=dist_dir)
-    build_archive(result_dir=result_dir, allow_partial_client=from_source)
+    build_archive(
+        result_dir=result_dir,
+        allow_partial_client=from_source,
+        no_client_binaries=no_client_binaries,
+    )
 
 
 def get_client_src():
@@ -401,14 +406,21 @@ def find_plugin_client_bin_dir(require_all=True):
     return directory
 
 
-def build_archive(result_dir=RESULT_DIR, allow_partial_client=False):
+def build_archive(result_dir=RESULT_DIR, allow_partial_client=False, no_client_binaries=False):
     """Create a filtered ZIP archive of the plugin."""
     print("# Creating Plugin archive")
 
     find_plugin_client_bin_dir(require_all=not allow_partial_client)
 
+    if no_client_binaries:
+        # The Godot Asset Store forbids precompiled executables — ship
+        # manifest/VERSION only; the plugin downloads the binary on first run.
+        ARCHIVE_EXCLUDE.append("bk_client-*")
+
     plugin_version = get_plugin_version()
     archive_base_name = get_archive_base_name(plugin_version)
+    if no_client_binaries:
+        archive_base_name += "_nobin"
     if allow_partial_client:
         archive_base_name += "_local-" + host_client_binary().removeprefix(
             "bk_client-"
@@ -577,6 +589,13 @@ parser_build.add_argument(
 parser_build.add_argument(
     "--client-bundle",
     help="Install a predownloaded bk_client.zip instead of downloading.",
+)
+parser_build.add_argument(
+    "--no-client-binaries",
+    action="store_true",
+    dest="no_client_binaries",
+    help="Exclude bk_client executables from the archive (Asset Store rule); "
+    "the plugin downloads the binary on first run.",
 )
 
 # COMMAND: get-client-release

@@ -14,6 +14,7 @@ signal changed
 signal tasks_reported(tasks: Array)
 
 const ClientBinary = preload("res://addons/assets2godot/client_binary.gd")
+const ClientDownload = preload("res://addons/assets2godot/client_download.gd")
 const GalleryApi = preload("res://addons/assets2godot/ui/gallery/gallery_api.gd")
 
 const CLIENT_PORTS = ["62485", "65425", "55428", "49452", "35452", "25152", "5152", "1234"]
@@ -34,7 +35,7 @@ const MAX_FAILED_REQUESTS: int = 3
 const SECRET_KEYS = ["access_token", "refresh_token", "api_key", "code_verifier"]
 
 
-enum State { DISABLED, EXPLORING, STARTING, CONNECTED, FAILED }
+enum State { DISABLED, EXPLORING, STARTING, DOWNLOADING, CONNECTED, FAILED }
 
 static func state_name(s: State) -> String:
 	var name = State.find_key(s)
@@ -74,17 +75,26 @@ var request_start_frame: int = 0
 var starting_since: int = 0
 var http_request: HTTPRequest
 var unsubscribe_http_request: HTTPRequest
+var dl_http_request: HTTPRequest
+var dl_redirects: int = 0
+var client_base_dir: String
 var timer: Timer
 
 
 # Set up here, as the plugin starts the connection before its children are ready.
 func _init(owner_plugin: EditorPlugin) -> void:
 	plugin = owner_plugin
-	client = ClientBinary.new(plugin, get_script().resource_path.get_base_dir().path_join("client"))
+	client_base_dir = get_script().resource_path.get_base_dir().path_join("client")
+	client = ClientBinary.new(plugin, client_base_dir)
 
 	http_request = HTTPRequest.new()
 	add_child(http_request)
 	http_request.request_completed.connect(on_request_completed)
+
+	dl_http_request = HTTPRequest.new()
+	dl_http_request.use_threads = true
+	add_child(dl_http_request)
+	dl_http_request.request_completed.connect(on_dl_request_completed)
 
 	unsubscribe_http_request = HTTPRequest.new()
 	add_child(unsubscribe_http_request)
@@ -121,6 +131,7 @@ func enter_state(new_state: State) -> void:
 				send_unsubscribe()
 			timer.stop()
 			http_request.cancel_request()
+			dl_http_request.cancel_request()
 			if new_state == State.FAILED:
 				plugin.log_error("Client failed: %s. Please consider reporting this with your Output." % fail_reason)
 			else:
@@ -137,8 +148,25 @@ func enter_state(new_state: State) -> void:
 			timer.wait_time = WAIT_STARTING
 			timer.start()
 			var error := client.launch(port, plugin.SERVER, get_client_log_path(port))
-			if error:
+			if error == "need_client_download":
+				enter_state(State.DOWNLOADING)
+			elif error:
 				fail(error)
+		State.DOWNLOADING:
+			# No bundled executable (store build): fetch the pinned release.
+			dl_redirects = 0
+			timer.wait_time = 0.5
+			timer.start()
+			if client.version.is_empty():
+				fail("no Client bundled and no version to download")
+				return
+			var zip_path := ClientDownload.tmp_zip_path(client.version)
+			DirAccess.make_dir_recursive_absolute(zip_path.get_base_dir())
+			dl_http_request.download_file = zip_path
+			plugin.log_info("Downloading Client v%s (first run only)..." % client.version)
+			var dl_error := dl_http_request.request(ClientDownload.download_url(client.version), ["User-Agent: Assets2Godot"])
+			if dl_error != OK:
+				fail("client download failed to start (error %s)" % dl_error)
 		State.CONNECTED:
 			timer.wait_time = WAIT_OK
 			timer.start()
@@ -177,6 +205,11 @@ func status_text() -> String:
 		State.STARTING:
 			var starting_elapsed := (Time.get_ticks_msec() - starting_since) / 1000
 			return "Starting (%d / %d s)…" % [starting_elapsed, STARTING_TIMEOUT / 1000]
+		State.DOWNLOADING:
+			var total := dl_http_request.get_body_size()
+			if total > 0:
+				return "Downloading Client (%d%%)…" % (dl_http_request.get_downloaded_bytes() * 100 / total)
+			return "Downloading Client…"
 		State.CONNECTED:
 			if failed_requests > 0:
 				return "Reconnecting (#%s)…" % failed_requests
@@ -192,6 +225,7 @@ func get_state_icon() -> Texture2D:
 		State.DISABLED: icon_name = "NodeDisabled"
 		State.EXPLORING: icon_name = "Search"
 		State.STARTING: icon_name = "Timer"
+		State.DOWNLOADING: icon_name = "AssetLib"
 		State.CONNECTED: icon_name = "StatusSuccess"
 		State.FAILED: icon_name = "StatusError"
 		_: return null
@@ -201,6 +235,9 @@ func get_state_icon() -> Texture2D:
 func on_timer_timeout() -> void:
 	if state in [State.FAILED, State.DISABLED]:
 		plugin.log_warning("Timer fired in %s state - shouldn't happen" % state_name(state))
+		return
+	if state == State.DOWNLOADING:
+		changed.emit() # refresh the download progress label
 		return
 
 	var http_client_status := http_request.get_http_client_status()
@@ -326,6 +363,39 @@ func on_request_completed(result: int, response_code: int, _headers: PackedStrin
 func mark_port_taken() -> void:
 	if not taken_ports.has(port):
 		taken_ports.append(port)
+
+
+## Client ZIP download finished (or a redirect hopped). HTTPRequest does not
+## follow redirects, so release downloads get chased manually.
+func on_dl_request_completed(result: int, response_code: int, headers: PackedStringArray, _body: PackedByteArray) -> void:
+	if state != State.DOWNLOADING:
+		return
+	if response_code in [301, 302, 303, 307, 308] and dl_redirects < 3:
+		dl_redirects += 1
+		for h in headers:
+			if h.to_lower().begins_with("location:"):
+				var url := h.split(":", true, 1)[1].strip_edges()
+				var error := dl_http_request.request(url, ["User-Agent: Assets2Godot"])
+				if error != OK:
+					fail("client download redirect failed (error %s)" % error)
+				return
+		fail("client download redirect without location")
+		return
+
+	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		fail("client download failed (result=%s, code=%d)" % [http_result_name(result), response_code])
+		return
+
+	var bin_name := ClientBinary.get_client_binary_name()
+	var target := ClientDownload.target_dir(client.version).path_join(bin_name)
+	var sha := ClientDownload.expected_sha256(client_base_dir, client.version, bin_name)
+	var error := ClientDownload.extract_binary(dl_http_request.download_file, bin_name, target, sha)
+	DirAccess.remove_absolute(dl_http_request.download_file)
+	if error:
+		fail("client download: %s" % error)
+		return
+	plugin.log_info("Client v%s downloaded to %s" % [client.version, target])
+	enter_state(State.STARTING)
 
 
 func request_failed() -> void:
