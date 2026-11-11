@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 import zipfile
 
@@ -458,6 +459,110 @@ def build_archive(result_dir=RESULT_DIR, allow_partial_client=False, no_client_b
     print(f"ZIP archive: {archive_path} ({archive_size})")
 
 
+def _http_get(url, timeout=20):
+    """GET url with a UA, following redirects. Returns (status, body, error)."""
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, resp.read(), None
+    except urllib.error.HTTPError as e:
+        return e.code, b"", str(e)
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        return None, b"", str(e)
+
+
+def _bsky_post_alive(handle, rkey):
+    """Resolve handle -> DID, then ask the public AppView for the post."""
+    s, b, err = _http_get(
+        "https://bsky.social/xrpc/com.atproto.identity.resolveHandle"
+        f"?handle={handle}"
+    )
+    if s != 200:
+        return False, f"resolveHandle HTTP {s} {err or ''}"
+    did = json.loads(b).get("did", "")
+    s, b, err = _http_get(
+        "https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread"
+        f"?uri=at://{did}/app.bsky.feed.post/{rkey}&depth=0"
+    )
+    if s != 200:
+        return False, f"getPostThread HTTP {s} {err or ''}"
+    return bool(json.loads(b).get("thread")), ""
+
+
+def launch_status():
+    """Poll every publicly checkable publication channel."""
+    checks = []
+
+    def add(name, url, fn):
+        checks.append((name, url, fn))
+
+    def simple(expected=200):
+        def f(s, b, err):
+            return s == expected, f"HTTP {s} {err or ''}".strip()
+        return f
+
+    def gh_json(key):
+        def f(s, b, err):
+            if s != 200:
+                return False, f"HTTP {s} {err or ''}"
+            data = json.loads(b)
+            return True, key(data)
+        return f
+
+    add("GitHub release v0.8.1",
+        f"{GITHUB_API}/repos/ikonnow/Assets2Godot/releases/tags/v0.8.1",
+        gh_json(lambda d: f"{len(d.get('assets', []))} assets"))
+    add("Raw icon (main)",
+        "https://raw.githubusercontent.com/ikonnow/Assets2Godot/main/img/store_thumbnail.png",
+        simple())
+    add("itch.io page", "https://ikonnow.itch.io/assets2godot", simple())
+    add("Godot Asset Store",
+        "https://store.godotengine.org/asset/ikonnow/assets2godot/",
+        lambda s, b, err: (s == 200,
+                           "live" if s == 200 else f"HTTP {s} (pending? 404 while in review)"))
+
+    def assetlib(s, b, err):
+        if s != 200:
+            return False, f"HTTP {s} {err or ''}"
+        results = json.loads(b).get("result", [])
+        return bool(results), f"{len(results)} approved asset(s)" if results \
+            else "not public yet (pending/rejected submissions are invisible)"
+    add("Asset Library (legacy)",
+        "https://godotengine.org/asset-library/api/asset?filter=assets2godot",
+        assetlib)
+
+    def pr_state(d):
+        merged = d.get("merged_at")
+        return f"merged {merged}" if merged else f"state={d.get('state')}"
+    add("awesome-godot PR #547",
+        f"{GITHUB_API}/repos/Calinou/awesome-godot/pulls/547",
+        gh_json(pr_state))
+    add("Reddit r/godot post",
+        "https://www.reddit.com/r/godot/comments/1xs027m/.json",
+        lambda s, b, err: (s == 200, f"HTTP {s}" + (" (403 = bot filter, post may still be live)" if s == 403 else "")))
+
+    def bsky(_s, _b, _e):
+        ok, note = _bsky_post_alive("ikonnow.bsky.social", "3mzvnci5fos2e")
+        return ok, note or "post exists"
+    add("Bluesky post",
+        "https://bsky.app/profile/ikonnow.bsky.social/post/3mzvnci5fos2e",
+        bsky)
+    add("Mastodon profile (gamedev.place)",
+        "https://mastodon.gamedev.place/@ikonnow",
+        lambda s, b, err: (s == 200,
+                           f"HTTP {s}" + (" (pending approval)" if s == 404 else "")))
+
+    width = max(len(n) for n, _, _ in checks)
+    for name, url, fn in checks:
+        status, body, err = _http_get(url)
+        try:
+            ok, note = fn(status, body, err)
+        except Exception as e:  # a checker bug must not kill the run
+            ok, note = False, f"check error: {e}"
+        print(f"{'OK  ' if ok else 'FAIL'} {name:<{width}}  {note}")
+        print(f"      {url}")
+
+
 def clean():
     """Remove build artifacts."""
     print("# Cleaning build artifacts")
@@ -772,6 +877,19 @@ parser_test_e2e.add_argument(
     action="store_true",
     help="Run the browser visibly instead of headless.",
 )
+
+# COMMAND: launch-status
+parser_launch_status = subparsers.add_parser(
+    "launch-status",
+    help="Poll all public launch channels (stores, social posts, PR).",
+    description=(
+        "GET every publicly reachable launch endpoint and print a status\n"
+        "table. Pending/moderated channels report HTTP state only —\n"
+        "auth-gated dashboards are tracked in AGENTS.md."
+    ),
+    formatter_class=NiceHelpFormatter,
+)
+parser_launch_status.set_defaults(func=lambda **_: launch_status())
 
 
 def main():
