@@ -509,8 +509,8 @@ def launch_status():
             return True, key(data)
         return f
 
-    add("GitHub release v0.8.1",
-        f"{GITHUB_API}/repos/ikonnow/Assets2Godot/releases/tags/v0.8.1",
+    add("GitHub release v0.8.2",
+        f"{GITHUB_API}/repos/ikonnow/Assets2Godot/releases/tags/v0.8.2",
         gh_json(lambda d: f"{len(d.get('assets', []))} assets"))
     add("Raw icon (main)",
         "https://raw.githubusercontent.com/ikonnow/Assets2Godot/main/img/store_thumbnail.png",
