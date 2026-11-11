@@ -111,9 +111,7 @@ func _ready() -> void:
 	# → Border panel (empty stylebox, upstream's L15/T0/R35/B15 margins)
 	# → Grid. The border lives INSIDE the scroll — identical to
 	# gallery.tscn's LibraryMargin/Scroll/Border chain.
-	var margin := MarginContainer.new()
-	margin.theme_type_variation = "NoBorderAssetLib"
-	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var margin := A2GUI.make_library_margin()
 	vbox.add_child(margin)
 	_scroll = A2GUI.make_scroll()
 	_scroll.resized.connect(_update_columns)
@@ -129,7 +127,7 @@ func _ready() -> void:
 	_empty.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.add_child(_empty)
 
-	_icon = Icons.render_svg(A2GUI.ICON_PATH, EditorInterface.get_editor_scale(), true)
+	_icon = Icons.render_svg_fit(A2GUI.ICON_PATH, 16.0 * EditorInterface.get_editor_scale(), true)
 	_details = A2GDetails.new()
 	_details.import_requested.connect(_import_entries)
 	add_child(_details)

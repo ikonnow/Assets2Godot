@@ -287,7 +287,7 @@ func _fetch_preview(slug: String) -> void:
 		_req.queue_free()
 	_req = HTTPRequest.new()
 	_req.timeout = 30.0
-	add_child(_req)
+	get_tree().root.add_child(_req)
 	_req.request_completed.connect(func(_r, code, _h, body):
 		_req.queue_free()
 		_req = null
@@ -300,10 +300,7 @@ func _fetch_preview(slug: String) -> void:
 		if err != OK:
 			err = img.load_jpg_from_buffer(body)
 		if err == OK:
-			# The real render replaces the card's low-res tile outright —
-			# one picture is enough, no thumb-vs-render strip.
 			_textures["primary"] = ImageTexture.create_from_image(img)
-			_textures.erase("thumb")
 			_set_frame("primary")
 			_rebuild_strip())
 	if _req.request(PhApi.preview_url(slug), [PhApi.UA_HEADER]) != OK:
@@ -429,7 +426,8 @@ func _fill_files(res_hint: String) -> void:
 	for i in _files.size():
 		_file_option.add_item(str(_files[i].get("label", "?")), i)
 		_file_option.set_item_metadata(i, _files[i])
-	var pick := PhApi.pick_default(_files, res_hint)
+	var pick := PhApi.pick_default(_files, res_hint,
+		PhApi.fmt_hint_for(str(asset.get("type", "")), _files))
 	if pick >= 0:
 		_file_option.select(pick)
 	_file_option.disabled = _file_option.item_count == 0

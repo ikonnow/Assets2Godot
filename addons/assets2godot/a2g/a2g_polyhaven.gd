@@ -63,6 +63,11 @@ var _dl_queue: Array = []
 var _dl_dest := ""
 var _dl_req: HTTPRequest
 var _dl_done := {}
+## Byte accounting for the drop ghost's progress box: the queued
+## option's total_size and the bytes of already-completed queue jobs —
+## the live job adds _dl_req.get_downloaded_bytes() on top.
+var _dl_total := 0
+var _dl_done_bytes := 0
 ## Cards outside _cards that still want their slug's thumbnail — the A2G
 ## downloads surface's tiles, kept weak-ish by pruning in _push_thumb.
 var _thumb_watchers := {}
@@ -156,13 +161,14 @@ func _ready() -> void:
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	fbar.add_child(_status)
 
+	var margin := A2GUI.make_library_margin()
+	vbox.add_child(margin)
 	_scroll = A2GUI.make_scroll()
-	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin.add_child(_scroll)
 	_border = A2GUI.make_scroll_border()
 	_scroll.add_child(_border)
 	_grid = A2GUI.make_grid()
 	_border.add_child(_grid)
-	vbox.add_child(_scroll)
 	_scroll.resized.connect(func(): A2GUI.update_columns(_scroll, _grid, _border))
 
 	_empty = Label.new()
@@ -282,7 +288,7 @@ func _set_catalog_state(s: int) -> void:
 func _fetch_url(url: String, cb: Callable, track_state := false) -> void:
 	var req := HTTPRequest.new()
 	req.timeout = 30.0
-	add_child(req)
+	(plugin if plugin != null else self).add_child(req)
 	req.request_completed.connect(func(_result, code, _h, body):
 		req.queue_free()
 		if track_state:
@@ -427,11 +433,18 @@ func _make_card(a: Dictionary, is_downloaded := false) -> Control:
 		{"remote_slug": slug, "remote_title": str(a.get("name", slug)),
 			"remote_url": PhApi.web_url(slug),
 			"remote_site": "polyhaven.com",
-			"remote_options": Callable(self, "_remote_options_for").bind(slug),
-			"remote_download": Callable(self, "_remote_download").bind(slug),
-			"remote_state": Callable(self, "_remote_state").bind(slug),
+			# Contract arg comes FIRST, the bound slug last — .bind(slug)
+			# would land the slug in the wrong slot and type-error the
+			# call (options/download/state all take one contract arg).
+			"remote_options": func(cb: Callable): _remote_options_for(slug, cb),
+			"remote_download": func(d): _remote_download(slug, d),
+			"remote_state": func(d): _remote_state(slug, d),
 			"remote_dir": Callable(self, "_downloaded_dir").bind(slug),
-			"remote_details": Callable(self, "_show_details").bind(slug)})
+			"remote_delete": Callable(self, "_remote_delete").bind(slug),
+			"remote_details": Callable(self, "_show_details").bind(slug),
+			"remote_progress": Callable(self, "_remote_progress").bind(slug),
+			"remote_dimensions": func() -> Variant: return _remote_dims_for(slug),
+			"remote_kind": str(a.get("type", ""))})
 	card.connect("selected", func(_asset): _show_details(slug))
 	card.call("set_downloaded", is_downloaded)
 	return card
@@ -546,7 +559,9 @@ func _push_thumb(slug: String, tex: Texture2D, fill: bool) -> void:
 	if not _thumb_watchers.has(slug):
 		return
 	var alive := []
-	for c: Control in _thumb_watchers[slug]:
+	# Untyped loop var: a stale freed ref would fail the typed assignment
+	# before is_instance_valid ever gets to prune it.
+	for c in _thumb_watchers[slug]:
 		if is_instance_valid(c):
 			c.call("set_thumb_texture", tex, fill)
 			alive.append(c)
@@ -564,7 +579,7 @@ func _pump_thumbs() -> void:
 		_thumb_active += 1
 		var req := HTTPRequest.new()
 		req.timeout = 15.0
-		add_child(req)
+		(plugin if plugin != null else self).add_child(req)
 		req.request_completed.connect(func(_r, code, _h, body):
 			req.queue_free()
 			_thumb_active -= 1
@@ -636,7 +651,9 @@ func _remote_options_for(slug: String, cb: Callable) -> void:
 		for e in options:
 			wrapped.append({"key": str(e.get("key", "")),
 				"label": str(e.get("label", "?")), "data": e})
-		cb.call(wrapped, PhApi.pick_default(options, _res_hint))
+		cb.call(wrapped, PhApi.pick_default(options, _res_hint,
+			PhApi.fmt_hint_for(str(_asset_by_slug(slug).get("type", "")),
+				options)))
 	if _files_cache.has(slug):
 		answer.call(_files_cache[slug])
 		return
@@ -666,6 +683,99 @@ func _remote_state(slug: String, _data: Variant) -> Dictionary:
 		"note": "" if this else "A download is running — wait for it to finish."}
 
 
+## The tile's Delete action: trash the asset's own folder under the
+## download target — trash_downloaded_dir refuses anything not strictly
+## inside _target_dir(), and an in-flight job on this slug can't have
+## its files pulled out from under it. Card badge, details popup and
+## the downloads pane all re-read disk state via the rescan.
+func _remote_delete(slug: String) -> bool:
+	if str(_dl_asset.get("slug", "")) == slug and (_dl_req != null or _converting):
+		_status.text = "A download is running — wait for it to finish."
+		return false
+	if not A2GUI.trash_downloaded_dir(_downloaded_dir(slug), _target_dir()):
+		return false
+	_dl_done.erase(slug)
+	var card: Control = _cards.get(slug)
+	if is_instance_valid(card):
+		card.call("set_downloaded", false)
+	if _details.visible and str(_details.asset.get("slug", "")) == slug:
+		_details.refresh_state()
+	_status.text = "Deleted %s (moved to trash)" % slug
+	# filesystem_changed refreshes the downloads pane even for external
+	# targets — its refresh() re-reads the disk listing.
+	EditorInterface.get_resource_filesystem().scan()
+	return true
+
+
+## The drop overlay's progress source: real byte fraction of the
+## queued download when this slug is the active job (0..1), 1.0 for a
+## finished one, -1.0 when the queue is busy elsewhere or the total is
+## unknown — the box stays empty/idle rather than lying about progress.
+func _remote_progress(slug: String) -> float:
+	# A running job for this slug outranks _dl_done — a repair or
+	# re-download must show its own fraction (<1.0 until _dl_done;
+	# got == total already while post-download conversion still moves
+	# files), or the drop poll would see "finished" mid-download and
+	# abort as "produced no usable files".
+	if str(_dl_asset.get("slug", "")) == slug \
+			and (_dl_req != null or _converting):
+		var got := _dl_done_bytes
+		if _dl_req != null:
+			got += _dl_req.get_downloaded_bytes()
+		if _dl_total <= 0:
+			return -1.0
+		return clampf(float(got) / float(_dl_total), 0.0, 0.999)
+	if _dl_done.has(slug):
+		return 1.0
+	# Not the running job — disk state answers (same truth remote_dir
+	# reports): a folder from an earlier session is a finished
+	# download, otherwise nothing has landed yet.
+	return 1.0 if _downloaded_dir(slug) != "" else -1.0
+
+
+## The catalog's real-world size for the ghost box — "dimensions" is the
+## site's own [x, y, z] meters, absent on textures/HDRIs (no box there).
+## Polyhaven reports model bounds in millimeters — the drop contract
+## wants meters.
+func _remote_dims(a: Dictionary) -> Variant:
+	var d: Variant = a.get("dimensions")
+	if d is Array and d.size() >= 3:
+		# Polyhaven authors in Blender — the array is z-up
+		# [x, depth, height]; Godot is y-up, so height sits at index 2.
+		return Vector3(float(d[0]), float(d[2]), float(d[1])) * 0.001
+	return null
+
+
+var _dims_cache := {}
+var _dims_pending := {}
+
+
+## The card payload's ghost-box source: dims from the catalog asset if
+## the listing carried them, else a lazy /info fetch — the overlay
+## re-reads the callable every drag frame, so the box morphs to the
+## real bounds the moment the answer lands.
+func _remote_dims_for(slug: String) -> Variant:
+	if _dims_cache.has(slug):
+		return _remote_dims({"dimensions": _dims_cache[slug]})
+	var a := _asset_by_slug(slug)
+	var d: Variant = _remote_dims(a)
+	if d != null:
+		return d
+	if not _dims_pending.has(slug):
+		_dims_pending[slug] = true
+		_fetch_url(PhApi.info_url(slug), func(text):
+			_dims_pending.erase(slug)
+			var info: Variant = JSON.parse_string(text)
+			if not info is Dictionary:
+				return
+			var dims: Variant = info.get("dimensions")
+			if dims is Array:
+				_dims_cache[slug] = dims
+				if not a.is_empty():
+					a["dimensions"] = dims)
+	return null
+
+
 # MARK: download
 
 ## Shared start for the quick tile's remote_download and the popup's
@@ -684,6 +794,8 @@ func _start_download(asset: Dictionary, option: Dictionary) -> void:
 	_dl_queue = [{"url": str(option.get("url", "")), "rel": PhApi.file_basename(str(option.get("url", "")))}]
 	for rel in option.get("includes", {}):
 		_dl_queue.append({"url": str(option["includes"][rel]), "rel": str(rel)})
+	_dl_total = int(option.get("total_size", 0))
+	_dl_done_bytes = 0
 	_dl_next()
 	if _details.visible and str(_details.asset.get("slug", "")) == str(asset.get("slug", "")):
 		_details.refresh_state()
@@ -704,7 +816,7 @@ func _dl_next() -> void:
 	_dl_req = HTTPRequest.new()
 	_dl_req.timeout = 300.0
 	_dl_req.download_file = dest + ".part"
-	add_child(_dl_req)
+	(plugin if plugin != null else self).add_child(_dl_req)
 	_dl_req.request_completed.connect(func(result, code, _h, _b):
 		var err := ""
 		if result != HTTPRequest.RESULT_SUCCESS:
@@ -713,6 +825,7 @@ func _dl_next() -> void:
 			err = "HTTP %d" % code
 		if err.is_empty() and DirAccess.rename_absolute(dest + ".part", dest) != OK:
 			err = "rename failed"
+		_dl_done_bytes += _dl_req.get_downloaded_bytes()
 		_dl_req.queue_free()
 		_dl_req = null
 		if not err.is_empty():
@@ -851,7 +964,7 @@ func _fetch_roots() -> void:
 
 func _fetch_client(endpoint: String, cb: Callable) -> void:
 	var req := HTTPRequest.new()
-	add_child(req)
+	(plugin if plugin != null else self).add_child(req)
 	req.request_completed.connect(func(_r, code, _h, body):
 		req.queue_free()
 		cb.call(JSON.parse_string(body.get_string_from_utf8()) if code == 200 else null))
@@ -861,7 +974,7 @@ func _fetch_client(endpoint: String, cb: Callable) -> void:
 
 func _post_client(endpoint: String, body: Dictionary) -> void:
 	var req := HTTPRequest.new()
-	add_child(req)
+	(plugin if plugin != null else self).add_child(req)
 	req.request_completed.connect(func(_a, _b, _c, _d): req.queue_free())
 	if req.request(plugin.connection.client_url(endpoint),
 			["Content-Type: application/json"], HTTPClient.METHOD_POST,

@@ -4,7 +4,7 @@ extends RefCounted
 ## classification, kind colors and the gallery-style asset card used by the
 ## Browser and Assets tabs (styled after ui/gallery/gallery_item.tscn).
 
-const ICON_PATH = "res://addons/assets2godot/a2g/icon.svg"
+const ICON_PATH = "res://addons/assets2godot/a2g/a2g_icon.svg"
 
 const KIND_BY_EXT := {
 	"fbx": "model", "obj": "model", "gltf": "model", "glb": "model",
@@ -104,7 +104,181 @@ static func asset_card(title: String, kind: String, source: String, path: String
 	payload.merge(extra)
 	item.setup_a2g(title, kind, type_name, "%s\n%s · %s\n%s" % [title, kind, source, short_path(path)], payload)
 	item.gui_input.connect(func(ev): _on_card_gui_input(item, ev))
+	item.set_drag_forwarding(_card_drag_data.bind(item), Callable(), Callable())
+	_fix_card_filters(item)
 	return item
+
+
+## Lets drags start anywhere on the card: the engine's drag-data lookup
+## walks up from the pressed control and stops at the first
+## MOUSE_FILTER_STOP child — badge labels inside the tile would be dead
+## spots for dragging otherwise. The item root keeps its own filter.
+static func _fix_card_filters(item: Control) -> void:
+	for c in item.find_children("*", "Control", true, false):
+		var cc := c as Control
+		if cc != null and cc.mouse_filter == Control.MOUSE_FILTER_STOP:
+			cc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+
+## Drag payload for set_drag_forwarding(): the engine calls the forward
+## callable with ONE argument — the local position — so bound args trail
+## it: (at, item), not (item, at). A res:// file hands the engine's own
+## "files" drag type (identical to the FileSystem dock, so the editor's
+## own drop targets accept it too), a remote-provider card passes its
+## remote_* payload through — the scene-drop overlay reads
+## slug/options/dimensions/progress out of it. Anything else isn't
+## draggable (external paths can't enter a res:// files drag).
+static func _card_drag_data(_at: Vector2, item: Control) -> Variant:
+	var asset: Dictionary = item.get("asset")
+	var payload: Dictionary = asset.get("a2g_payload", {})
+	var path := str(payload.get("path", ""))
+	var data: Variant = null
+	if path.begins_with("res://"):
+		data = {"type": "files", "files": [path]}
+	elif str(payload.get("remote_slug", "")) != "":
+		data = payload.duplicate()
+	if data == null:
+		return null
+	var preview := Label.new()
+	preview.text = str(payload.get("remote_title",
+		asset.get("displayName", path.get_file())))
+	item.set_drag_preview(preview)
+	return data
+
+
+## Combined AABB of a subtree in its own coordinate frame — local
+## transforms accumulated from [param root] down, so it works whether the
+## subtree is in the tree or not (a freshly instantiated drop candidate
+## isn't). Duck-typed on get_aabb() like the editor: ImporterMeshInstance3D
+## (what GLTFDocument yields in the editor) is a Node3D, not a
+## VisualInstance3D — its mesh carries the box instead. Fallback matches
+## the old a2g_thumbs helper: a unit box centered on origin.
+static func world_aabb(root: Node) -> AABB:
+	var aabb := AABB()
+	var found := false
+	var stack := [[root, Transform3D()]]
+	while not stack.is_empty():
+		var it: Array = stack.pop_back()
+		var n: Node = it[0]
+		var xform: Transform3D = it[1]
+		var n3d := n as Node3D
+		if n3d != null:
+			xform = xform * n3d.transform
+			var box: Variant = null
+			if n3d.has_method("get_aabb"):
+				box = n3d.get_aabb()
+			else:
+				var m: Variant = n3d.get("mesh")
+				if m != null and m.has_method("get_aabb"):
+					box = m.get_aabb()
+			if box is AABB:
+				var sub: AABB = xform * box
+				aabb = sub if not found else aabb.merge(sub)
+				found = true
+		for c in n.get_children():
+			stack.append([c, xform])
+	return aabb if found else AABB(Vector3(-0.5, -0.5, -0.5), Vector3.ONE)
+
+
+## GLTFDocument/FBXDocument generate_scene() yields ImporterMeshInstance3D
+## nodes in the editor — Node3D subclasses that draw nothing. Swaps every
+## node whose "mesh" property resolves through get_mesh() (ImporterMesh →
+## ArrayMesh) for a renderable MeshInstance3D, preserving transform,
+## children and sibling order. Returns the (possibly replaced) root.
+static func resolve_importer_meshes(root: Node) -> Node:
+	var out := root
+	var stack: Array[Node] = [root]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		stack.append_array(n.get_children())
+		var n3d := n as Node3D
+		if n3d == null:
+			continue
+		var m: Variant = n3d.get("mesh")
+		if m == null or not m.has_method("get_mesh"):
+			continue
+		var converted: Variant = m.get_mesh()
+		if converted == null:
+			continue
+		var mi := MeshInstance3D.new()
+		mi.name = n3d.name
+		mi.transform = n3d.transform
+		mi.mesh = converted
+		for c in n3d.get_children():
+			n3d.remove_child(c)
+			mi.add_child(c)
+		var parent := n3d.get_parent()
+		if parent != null:
+			var idx := n3d.get_index()
+			parent.remove_child(n3d)
+			parent.add_child(mi)
+			parent.move_child(mi, idx)
+		else:
+			out = mi
+		n3d.free()
+	return out
+
+
+## Loads a placeable file into a Node3D without going through the editor
+## importer: res:// uses ResourceLoader (imported PackedScene/Mesh),
+## absolute paths fall back to the runtime GLTF/FBX documents like
+## a2g_thumbs — so a just-downloaded file works before its import lands.
+## Returns null for non-placeable resources (materials, textures…).
+static func instantiate_placeable(path: String) -> Node3D:
+	var ext := path.get_extension().to_lower()
+	var node: Node3D = null
+	# Downloads arrive as absolute paths — the FileSystem-side file is
+	# the res:// form, and it's what an instance's scene_file_path
+	# must point at (the .tscn serializer writes it as an ExtResource).
+	var res_path := ProjectSettings.localize_path(path)
+	# Imported files load as real PackedScenes — the engine sets
+	# scene_file_path itself, so the placed node is a true scene
+	# instance (selects as one, "editable children" expands it).
+	if res_path.begins_with("res://") and ResourceLoader.exists(res_path):
+		var res := ResourceLoader.load(res_path)
+		if res is PackedScene:
+			node = res.instantiate() as Node3D
+		elif res is Mesh:
+			node = MeshInstance3D.new()
+			node.mesh = res
+	# Model formats NEVER go through ResourceLoader.load while their
+	# import is still pending: a res:// .gltf that isn't imported yet
+	# triggers the GUI import pipeline mid-drop — that path has
+	# hard-crashed the editor (signal 11). The raw document parsers
+	# read res:// too and skip the importer entirely.
+	elif ext in ["glb", "gltf"]:
+		var doc := GLTFDocument.new()
+		var state := GLTFState.new()
+		if doc.append_from_file(path, state) == OK:
+			node = doc.generate_scene(state) as Node3D
+	elif ext == "fbx":
+		if ClassDB.class_exists("FBXDocument") and ClassDB.class_exists("FBXState"):
+			var doc: Object = ClassDB.instantiate("FBXDocument")
+			var state: Object = ClassDB.instantiate("FBXState")
+			if doc != null and state != null \
+					and doc.call("append_from_file", path, state) == OK:
+				node = doc.call("generate_scene", state) as Node3D
+	if node == null:
+		return null
+	node = resolve_importer_meshes(node) as Node3D
+	# Raw-parsed res:// models get instanced manually: scene_file_path
+	# marks the node as an instance of its source file (the import
+	# lands at the next scan and the node reloads as a real instance),
+	# children owned by it instead of the edited scene.
+	if node != null and node.scene_file_path.is_empty() \
+			and res_path.begins_with("res://"):
+		node.scene_file_path = res_path
+		_instance_owners(node)
+	return node
+
+
+## Every descendant of an instanced root belongs to the instance's own
+## file, not the edited scene — the same ownership PackedScene
+## assigns, which is what hides the children until "editable children".
+static func _instance_owners(node: Node) -> void:
+	for c in node.get_children():
+		c.owner = node
+		_instance_owners(c)
 
 
 ## MARK: asset context menu — right-click actions mirroring the Godot
@@ -273,9 +447,36 @@ static func install_bk_quick_download(tree: SceneTree, gallery: Control) -> void
 			return
 		if node.get_script() != GalleryItemScript or node.has_meta(&"a2g_bk_quick"):
 			return
+		# tree.node_added fires for EVERY GalleryItem entering the editor —
+		# provider panes build cards through asset_card() too. Their own
+		# _card_drag_data forwarding must not be overwritten with the BK
+		# hook (its a2g guard returns null → provider cards never drag).
+		var nasset: Variant = node.get("asset")
+		if nasset is Dictionary and nasset.get("a2g", false):
+			return
 		node.set_meta(&"a2g_bk_quick", true)
 		node.gui_input.connect(func(ev): _on_bk_card_input(node, ev, gallery))
+		node.set_drag_forwarding(_bk_card_drag_data.bind(node, gallery),
+			Callable(), Callable())
+		_fix_card_filters(node)
 	tree.node_added.connect(holder[0])
+
+
+## BlendKit gallery cards are built upstream, not via asset_card() — the
+## same drag-forwarding hook, reusing _bk_remote_entry so the scene
+## preview gets the full remote_* contract (download/progress/dir).
+static func _bk_card_drag_data(_at: Vector2, item: Control, gallery: Control) -> Variant:
+	var asset: Variant = item.get("asset")
+	if not asset is Dictionary or asset.is_empty() or asset.get("a2g", false) \
+			or not is_instance_valid(gallery):
+		return null
+	var entry := _bk_remote_entry(asset, gallery)
+	if entry.is_empty():
+		return null
+	var preview := Label.new()
+	preview.text = str(entry.get("remote_title", "asset"))
+	item.set_drag_preview(preview)
+	return entry
 
 
 static func _on_bk_card_input(item: Control, ev: InputEvent, gallery: Control) -> void:
@@ -311,11 +512,29 @@ static func _bk_remote_entry(asset: Dictionary, gallery: Control) -> Dictionary:
 		"remote_options": func(cb): cb.call(opts, default_idx),
 		"remote_download": func(ft): _bk_download(asset, str(ft), gallery, plugin),
 		"remote_state": func(_ft): return _bk_state(asset, gallery, plugin),
+		"remote_progress": func() -> float:
+			return _bk_progress(asset, gallery),
+		"remote_dimensions": null,
+		"remote_kind": str(asset.get("assetType", "")),
 		"remote_dir": func() -> String:
 			return ProjectAssets.asset_folder(plugin.absolute_download_path, asset) \
 				if gallery.is_downloaded(asset) else "",
+		"remote_delete": func() -> bool:
+			return _bk_delete(asset, plugin),
 		"remote_details": func(): gallery.open_details(asset),
 	}
+
+
+## Scene-preview progress source for the BlendKit card: the Downloads
+## model's task percentage, -1 while nothing is running, 1 once the
+## asset is downloaded (the preview then treats the drop as local).
+static func _bk_progress(asset: Dictionary, gallery: Control) -> float:
+	if not is_instance_valid(gallery):
+		return -1.0
+	var dl: Dictionary = gallery.downloads.get_download(GalleryApi.base_id(asset))
+	if dl.get("status", "") in GalleryApi.ACTIVE_DOWNLOAD:
+		return clampf(float(dl.get("progress", 0)) / 100.0, 0.0, 1.0)
+	return 1.0 if gallery.is_downloaded(asset) else -1.0
 
 
 static func _bk_options(asset: Dictionary, plugin) -> Array:
@@ -342,6 +561,32 @@ static func _bk_state(asset: Dictionary, gallery: Control, plugin) -> Dictionary
 	var reason := GalleryApi.cant_download_message(asset)
 	return {"label": "Download", "enabled": false,
 		"note": reason if not reason.is_empty() else "This asset can't be downloaded."}
+
+
+## Trashes the asset's folder under the download root — the guard keeps
+## it honest: only a dir strictly inside the provider's own root goes to
+## the trash, never a path the payload could name. filesystem_changed
+## then drives every downloaded-state surface (project view, badges,
+## provider downloads panes) to re-scan on its own.
+static func _bk_delete(asset: Dictionary, plugin) -> bool:
+	var dir := ProjectAssets.asset_folder(plugin.absolute_download_path, asset)
+	if not trash_downloaded_dir(dir, plugin.absolute_download_path):
+		return false
+	EditorInterface.get_resource_filesystem().scan()
+	return true
+
+
+## The shared guard behind every remote_delete: [param dir] is trashed
+## ONLY when it resolves strictly inside [param root] — deleting a card's
+## payload path outright would hand the UI a remove-anything primitive.
+static func trash_downloaded_dir(dir: String, root: String) -> bool:
+	dir = dir.replace("\\", "/").rstrip("/")
+	root = root.replace("\\", "/").rstrip("/")
+	if dir.is_empty() or root.is_empty() or not dir.begins_with(root + "/"):
+		return false
+	if not DirAccess.dir_exists_absolute(dir):
+		return false
+	return OS.move_to_trash(dir) == OK
 
 
 static func _bk_download(asset: Dictionary, ft: String, gallery: Control, plugin) -> void:
@@ -474,6 +719,19 @@ static func update_columns(scroll: ScrollContainer, grid: GridContainer, border:
 		c.set_width(width)
 
 
+## gallery.tscn's LibraryMargin: the MarginContainer between the pane's
+## VBox and the card scroll. The editor theme's NoBorderAssetLib
+## variation gives it negative margins (-4 L/R/B on 4.7) that cancel the
+## AssetLib "bg" panel's content margin, so the scroll reaches the pane's
+## edges — without it the scroll is 8px narrower and update_columns()
+## lands every card 1px narrower and 4px right of BlendKit's.
+static func make_library_margin() -> MarginContainer:
+	var margin := MarginContainer.new()
+	margin.theme_type_variation = "NoBorderAssetLib"
+	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	return margin
+
+
 ## The gallery.tscn chrome around a card grid: a Border PanelContainer
 ## inside the ScrollContainer whose StyleBoxEmpty panel carries the
 ## content margins upstream sets at runtime (L15/T0/R35/B15 * scale).
@@ -495,7 +753,8 @@ static func make_scroll_border() -> PanelContainer:
 ## A ScrollContainer configured like the gallery's Scroll node: the editor
 ## theme's "Tree" panel stylebox as panel override (its content margin
 ## insets the scroll content ~6px left, and it paints the bounded-panel
-## background upstream has) + horizontal scrollbar never shown.
+## background upstream has) + horizontal scrollbar never shown + the
+## top/left scroll hints gallery.gd sets on Godot 4.6+.
 static func make_scroll() -> ScrollContainer:
 	var scroll := ScrollContainer.new()
 	# Resolved against the editor base control — an out-of-tree control has
@@ -503,6 +762,8 @@ static func make_scroll() -> ScrollContainer:
 	scroll.add_theme_stylebox_override("panel",
 			EditorInterface.get_base_control().get_theme_stylebox("panel", "Tree"))
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	if "scroll_hint_mode" in scroll: # Godot 4.6+
+		scroll.set("scroll_hint_mode", 2) # SCROLL_HINT_MODE_TOP_AND_LEFT
 	return scroll
 
 
@@ -549,13 +810,14 @@ static func make_grid() -> GridContainer:
 
 ## MARK: provider marks — the same logo files the provider menus use,
 ## shared by the tab strip, the Sources tree and the settings menu so a
-## provider reads identically on every surface. `vb` is the SVG viewBox
-## side, `mono` requests the editor-icon recolor (light on dark themes);
-## colored marks (Polyhaven) keep their paint like their menu logo does.
+## provider reads identically on every surface. `mono` requests the
+## editor-icon recolor (light on dark themes); colored marks (Polyhaven)
+## keep their paint like their menu logo does. Rendered content-fit, so
+## a file's canvas size or inner padding is irrelevant.
 const PROVIDER_LOGOS := {
-	"blendkit": {"path": "res://addons/assets2godot/logo/blendkit-logo-hexa_pure.svg", "vb": 320.0, "mono": false},
-	"polyhaven": {"path": "res://addons/assets2godot/logo/polyhaven-icon.svg", "vb": 1250.0, "mono": false},
-	"ambientcg": {"path": "res://addons/assets2godot/logo/ambientcg-icon.svg", "vb": 4096.0, "mono": true},
+	"blendkit": {"path": "res://addons/assets2godot/logo/blendkit-logo-hexa_pure.svg", "mono": false},
+	"polyhaven": {"path": "res://addons/assets2godot/logo/polyhaven-icon.svg", "mono": false},
+	"ambientcg": {"path": "res://addons/assets2godot/logo/ambientcg-icon.svg", "mono": true},
 }
 
 
@@ -564,5 +826,5 @@ static func provider_icon(key: String, px := 16.0) -> Texture2D:
 	var info: Dictionary = PROVIDER_LOGOS.get(key, {})
 	if info.is_empty():
 		return null
-	return Icons.render_svg(str(info["path"]),
-		px * EditorInterface.get_editor_scale() / float(info["vb"]), bool(info["mono"]))
+	return Icons.render_svg_fit(str(info["path"]),
+		px * EditorInterface.get_editor_scale(), bool(info["mono"]))

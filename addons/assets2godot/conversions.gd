@@ -324,7 +324,9 @@ static func organize_materials(dir: String) -> void:
 	if not DirAccess.dir_exists_absolute(dir):
 		return
 	for subdir in DirAccess.get_directories_at(dir):
-		if not subdir.begins_with("."):
+		# textures_* dirs are this pass's own output — re-entering one
+		# re-wraps an organized folder into textures_*/textures_*/.
+		if not subdir.begins_with(".") and not subdir.begins_with("textures_"):
 			organize_materials(dir.path_join(subdir))
 	var stems := []
 	for file in DirAccess.get_files_at(dir):
@@ -372,13 +374,16 @@ static func _is_texture_file(file: String) -> bool:
 ## by type (plywood_diff_1k.png). nor_dx needs a Y-flip Godot can't do,
 ## so the GL variant binds and dx just moves along in the set.
 const MAP_BINDINGS := {
-	"albedo": ["diff", "diffuse", "basecolor", "col", "albedo"],
-	"normal": ["nor_gl", "nor", "normal"],
+	"albedo": ["diff", "diffuse", "basecolor", "col", "color", "albedo"],
+	"normal": ["nor_gl", "nor", "normal", "normalgl"],
 	"roughness": ["rough", "roughness"],
-	"ao": ["ao", "occlusion"],
-	"height": ["disp", "displacement", "height"],
-	"metallic": ["metal", "metallic"],
+	"ao": ["ao", "occlusion", "ambientocclusion"],
+	"height": ["disp", "displacement", "height", "protrusion"],
+	"metallic": ["metal", "metallic", "metalness"],
 	"orm": ["arm", "orm"],
+	# Detail overlay (ambientCG's "Details" map) — StandardMaterial3D's
+	# detail_albedo slot, the engine's own second-layer convention.
+	"detail": ["details", "detail"],
 }
 
 
@@ -392,7 +397,10 @@ static func materialize_maps(dir: String) -> void:
 	if not DirAccess.dir_exists_absolute(dir):
 		return
 	for subdir in DirAccess.get_directories_at(dir):
-		if not subdir.begins_with("."):
+		# textures_* dirs are organized output, never bare map sets —
+		# without the skip a second run materializes them one level
+		# deeper and orphans the .tres's ext_resource paths.
+		if not subdir.begins_with(".") and not subdir.begins_with("textures_"):
 			materialize_maps(dir.path_join(subdir))
 	var slug := dir.get_file()
 	var groups := {} # res → [{file, token}]
@@ -425,9 +433,11 @@ static func materialize_maps(dir: String) -> void:
 			sub, bound)
 
 
-## "<slug>_<type>_<res>.<img>" → {res, token}: the trailing _<digits>k?
-## is the resolution, what sits between slug_ and it is the map type.
-## {} for anything that isn't a map — previews (<slug>.png) included.
+## Map filename → {res, token}: the res part is the one matching
+## <digits>k (Polyhaven puts it last, ambientCG mid-name with a -fmt
+## tail: "Terrain004_2K-JPG_Color"). The token is whatever comes after
+## it, else what's between slug_ and it. {} for non-maps — previews
+## (<slug>.png) included.
 static func _map_parts(file: String, slug: String) -> Dictionary:
 	if not _is_texture_file(file):
 		return {}
@@ -438,12 +448,22 @@ static func _map_parts(file: String, slug: String) -> Dictionary:
 	var parts := bn.split("_")
 	if parts.size() < 2:
 		return {}
-	var res := str(parts[parts.size() - 1])
-	if not res.to_lower().trim_suffix("k").is_valid_int():
+	var res_i := -1
+	for i in parts.size():
+		var p := str(parts[i]).to_lower().get_slice("-", 0)
+		if p.ends_with("k") and p.trim_suffix("k").is_valid_int():
+			res_i = i
+			break
+	if res_i < 0:
 		return {}
-	var rest := "_".join(parts.slice(0, parts.size() - 1))
-	var token := rest.substr(slug.length() + 1) \
-		if rest.begins_with(slug + "_") else rest
+	var res := str(parts[res_i]).get_slice("-", 0)
+	var token := ""
+	if res_i + 1 < parts.size():
+		token = "_".join(parts.slice(res_i + 1))
+	else:
+		var rest := "_".join(parts.slice(0, res_i))
+		token = rest.substr(slug.length() + 1) \
+			if rest.begins_with(slug + "_") else rest
 	if token.is_empty() or token == slug:
 		return {}
 	return {"res": res, "token": token}
@@ -475,6 +495,8 @@ static func _write_material_tres(path: String, sub: String, bound: Dictionary) -
 			"heightmap_texture = ExtResource(\"height\")", "heightmap_scale = 1.0"],
 		"metallic": ["metallic_texture = ExtResource(\"metallic\")"],
 		"orm": ["orm_texture = ExtResource(\"orm\")"],
+		"detail": ["detail_enabled = true",
+			"detail_albedo = ExtResource(\"detail\")"],
 	}
 	for slot in ids:
 		for p in props[slot]:

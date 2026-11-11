@@ -232,6 +232,9 @@ func _ready() -> void:
 	_list.item_clicked.connect(_on_list_item_clicked)
 	_list.item_activated.connect(_on_list_item_activated)
 	_list.multi_selected.connect(func(_i, _s): _update_import_btn())
+	# res:// rows drag like the FileSystem dock — the engine's own "files"
+	# payload, so every native drop target accepts it.
+	_list.set_drag_forwarding(_on_list_drag, Callable(), Callable())
 	_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(_list)
 	# The grid fills edge to edge: columns stretch by a few px so no dead
@@ -289,7 +292,7 @@ func _ready() -> void:
 	_import_dialog = A2GImportDialog.new()
 	add_child(_import_dialog)
 
-	_icon = Icons.render_svg(A2GUI.ICON_PATH, EditorInterface.get_editor_scale(), true)
+	_icon = Icons.render_svg_fit(A2GUI.ICON_PATH, 16.0 * EditorInterface.get_editor_scale(), true)
 	_thumbs = A2GThumbs.new()
 	_thumbs.rendered.connect(_on_rendered)
 	_thumbs.failed.connect(_on_thumbs_failed)
@@ -439,7 +442,7 @@ var _provider_roots := {}
 ## JSON (or null on failure). Same shape as the dock's helper.
 func _fetch(endpoint: String, cb: Callable) -> void:
 	var req := HTTPRequest.new()
-	add_child(req)
+	(plugin if plugin != null else self).add_child(req)
 	req.request_completed.connect(func(_result, code, _h, body):
 		req.queue_free()
 		cb.call(JSON.parse_string(body.get_string_from_utf8()) if code == 200 else null))
@@ -543,6 +546,21 @@ func _on_list_item_activated(index: int) -> void:
 	_details.hide()
 	if index < _list_entries.size():
 		A2GUI._open_entry(_list_entries[index])
+
+
+## FileSystem-identical files drag for the selected res:// rows; rows
+## pointing outside the project can't join a files drag, so a selection
+## with no res:// path just doesn't drag.
+func _on_list_drag(_at: Vector2) -> Variant:
+	var files: Array[String] = []
+	for idx in _list.get_selected_items():
+		if idx < _list_entries.size():
+			var p := str(_list_entries[idx].get("path", ""))
+			if p.begins_with("res://"):
+				files.append(p)
+	if files.is_empty():
+		return null
+	return {"type": "files", "files": files}
 
 
 func _show_entry_details(entry: Dictionary) -> void:
@@ -790,13 +808,12 @@ func _is_image(path: String) -> bool:
 	return path.get_extension().to_lower() in A2GThumbs.IMAGE_EXTS
 
 
-## Renderable types go through the A2G rig first: it produces the same
-## preview as the native generators but at card size — the native queue
-## is fixed at 64px and looks soft on the grid. Only when the rig finds
-## nothing renderable (failed signal) does the native queue take over,
-## for res:// and external .tres/.res alike. Audio keeps the native
-## edited-preview waveform (no renderer of our own). Payload is
-## {idx, path} of the list item.
+## Renderable types go through the native preview queue first — the A2G
+## EditorResourcePreviewGenerator covers images + .glb/.gltf/.fbx there
+## and its results land in the shared resthumb cache. `staged` on the
+## payload re-routes a null preview to the A2G viewport renderer
+## (external .tscn/.scn and anything the generator can't produce). Audio
+## keeps the native edited-preview waveform. Payload = {idx, path}.
 const STAGED_EXTS := ["tres", "res", "tscn", "scn", "glb", "gltf", "fbx"]
 
 func _queue_preview(path: String, payload: Dictionary) -> void:
@@ -822,11 +839,12 @@ func _queue_preview(path: String, payload: Dictionary) -> void:
 			if stream != null:
 				previewer.queue_edited_resource_preview(stream, self, "_on_preview", payload)
 				return
-	elif ext in STAGED_EXTS and _thumbs != null:
-		# fallback carries the native-loadable path (res:// for project
-		# files, abs for external .tres/.res) — _on_thumbs_failed uses it.
-		payload["fallback"] = res_path if res_path != "" else ext in ["tres", "res"]
-		_thumbs.request(payload, path)
+	elif ext in STAGED_EXTS or ext in A2GThumbs.IMAGE_EXTS:
+		if previewer != null:
+			payload["staged"] = true
+			previewer.queue_resource_preview(path, self, "_on_preview", payload)
+		elif _thumbs != null:
+			_thumbs.request(payload, path)
 		return
 	elif res_path != "":
 		if previewer != null:
@@ -850,32 +868,20 @@ func _on_rendered(payload, texture: Texture2D) -> void:
 	_set_item_thumb(payload, texture)
 
 
-## The rig found nothing renderable — fall back to the native queue for
-## the paths it can actually reach (res://, external .tres/.res).
-func _on_thumbs_failed(payload, path: String) -> void:
-	if not (payload is Dictionary):
-		return
-	var fb: Variant = payload.get("fallback")
-	if fb == null or fb == false:
-		return
-	payload.erase("fallback")
-	var previewer := EditorInterface.get_resource_previewer()
-	if previewer == null:
-		return
-	if fb is String:
-		previewer.queue_resource_preview(fb, self, "_on_preview", payload)
-	elif path.get_extension().to_lower() in ["tres", "res"]:
-		previewer.queue_resource_preview(path, self, "_on_preview", payload)
+## The rig found nothing renderable after the native queue already had
+## its turn (staged flag) — the chain ends, the tile keeps its kind icon.
+func _on_thumbs_failed(_payload, _path: String) -> void:
+	pass
 
 
 func _on_preview(_path: String, preview: Texture2D, thumbnail_preview: Texture2D, payload) -> void:
 	var tex: Texture2D = preview if preview else thumbnail_preview
 	if tex:
 		_set_item_thumb(payload, tex)
-	elif payload is Dictionary and payload.get("fallback") and _thumbs != null:
-		# Null preview on a queued external .tres/.res — usually a
-		# PackedScene .tres (resthumb-only generator) or a resource type
-		# without a generator; the A2G renderer stages it instead.
+	elif payload is Dictionary and payload.get("staged") and _thumbs != null:
+		# Null from the native queue — external .tscn/.scn, PackedScene
+		# .tres without resthumb, anything the generator can't produce.
+		payload.erase("staged")
 		_thumbs.request(payload, str(payload.get("path", "")))
 
 
