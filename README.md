@@ -94,18 +94,17 @@ python dev.py           # all commands (test, e2e, launch-status, ...)
 ```
 
 The repo is itself a Godot project — open it in the editor to hack on
-the plugin. Architecture notes and the provider-integration spec live in
-[`docs/specs/`](docs/specs/); test suites are dev tooling and never ship.
+the plugin. The `dev` branch carries the full dev tooling — architecture
+notes, provider specs and test suites (none of it ships to `main`).
 
 ## Roadmap
 
 - **Organization overlay** — collections, favorites, multi-select and
   batch import across providers
 - **More providers** — the provider contract is documented in
-  [`docs/specs/remote-providers.md`](docs/specs/remote-providers.md)
+  `docs/specs/remote-providers.md` on the `dev` branch
 - **Client signing** — signed `bk_client` binaries (today's unsigned
   builds trigger expected Gatekeeper/SmartScreen warnings)
-- **Godot Asset Store** — submitted, currently under review
 
 ## Credits & License
 
