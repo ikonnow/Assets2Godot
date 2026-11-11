@@ -5,6 +5,33 @@
 This fork continues the Blendkit for Godot lineage under the Assets2Godot
 name. Entries below `0.8.0` are upstream history, kept for reference.
 
+## 0.8.2 - 2026-11-11
+
+### Added
+
+- **Scene drop**: drag remote assets straight into the 3D viewport — a
+  ghost preview shows the real footprint while the download streams
+  (progress fill), then the asset lands under the cursor as a single
+  undo action. Materials assign to the mesh under the cursor, HDRIs
+  apply to the WorldEnvironment; dropping a card on the FileSystem
+  dock starts the download in place.
+- **Heightmap terrains** (ambientCG): terrain downloads carrying the
+  EXR heightmap place real displaced geometry — ArrayMesh from the
+  height grid + HeightMapShape3D collision — at metric extent/relief
+  (new `assets2godot/terrain_*` editor settings; a sibling OBJ's grid
+  spacing wins when present). Map sets without heightmaps keep the
+  textured-plane fallback.
+- **Delete action** on the quick-download tile: trash a downloaded
+  asset folder straight from the card (guarded to paths inside the
+  provider root, refuses while a download is in flight).
+- Custom `EditorResourcePreviewGenerator` renders model previews
+  inside the editor on Godot 4.6+ (staged thumbnail path stays the
+  fallback below).
+
+### Changed
+
+- The editor icon is `a2g_icon.svg` now.
+
 ## 0.8.1 - 2026-11-10
 
 ### Changed
