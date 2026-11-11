@@ -105,7 +105,6 @@ the plugin. Architecture notes and the provider-integration spec live in
   [`docs/specs/remote-providers.md`](docs/specs/remote-providers.md)
 - **Client signing** — signed `bk_client` binaries (today's unsigned
   builds trigger expected Gatekeeper/SmartScreen warnings)
-- **Godot Asset Store** — submitted, currently under review
 
 ## Credits & License
 
