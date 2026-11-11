@@ -20,12 +20,14 @@ const RELEASES_API := "https://api.github.com/repos/ikonnow/Assets2Godot/release
 const A2G_DIR := "res://Assets2Godot"
 
 enum Item { SETTINGS, OPEN_DIR, UPDATE, UPDATE_STATUS, SOURCES, ISSUES,
-	VERSION, SHOW_FILES, TAB_LOGOS }
+	VERSION, SHOW_FILES, TAB_LOGOS, PANEL_DOCKED }
 ## Provider check items get consecutive ids from this base — index into
 ## plugin.PROVIDERS maps back to the provider entry.
 const PROVIDER_BASE := 100
+const VIEW_MODES := ["Grid", "List"]
 const THUMB_SIZES := [128, 256, 512]
 const SCENE_CAPS := [50, 150, 300, 600, 1000]
+const SETTING_VIEW := "assets2godot/browser_display_mode"
 const SETTING_THUMB := "assets2godot/thumb_size"
 const SETTING_CAP := "assets2godot/scene_resource_cap"
 const SETTING_FILES := "assets2godot/show_all_files"
@@ -34,6 +36,7 @@ const SETTING_TAB_LOGOS := "assets2godot/tab_logos"
 var plugin: EditorPlugin
 
 var _menu: PopupMenu
+var _view_menu: PopupMenu
 var _thumb_menu: PopupMenu
 var _cap_menu: PopupMenu
 var _settings: AcceptDialog
@@ -54,6 +57,10 @@ func setup(new_plugin: EditorPlugin) -> void:
 	add_child(_menu)
 	_menu.id_pressed.connect(_on_id_pressed)
 	_menu.popup_hide.connect(func(): set_pressed_no_signal(false))
+	_view_menu = PopupMenu.new()
+	_view_menu.name = "ViewMenu"
+	_view_menu.id_pressed.connect(func(id): _set_es(SETTING_VIEW, id))
+	_menu.add_child(_view_menu)
 	_thumb_menu = PopupMenu.new()
 	_thumb_menu.name = "ThumbMenu"
 	_thumb_menu.id_pressed.connect(func(id): _set_es(SETTING_THUMB, THUMB_SIZES[id]))
@@ -103,6 +110,7 @@ func _on_toggled(pressed: bool) -> void:
 ## longest item.
 func _fill_menu() -> void:
 	_menu.clear()
+	_view_menu.clear()
 	_thumb_menu.clear()
 	_cap_menu.clear()
 	# Provider tab switches — the registry's keys and logos, checked
@@ -124,6 +132,11 @@ func _fill_menu() -> void:
 	_menu.set_item_checked(-1, plugin.tab_logos_enabled())
 	_menu.set_item_tooltip(-1, "Show each provider's logo in its main tab — off keeps tabs text-only.")
 	_menu.add_separator("Assets2Godot")
+	for i in VIEW_MODES.size():
+		_view_menu.add_radio_check_item(VIEW_MODES[i], i)
+		_view_menu.set_item_checked(i, int(_es(SETTING_VIEW, 0)) == i)
+	_menu.add_submenu_item("Browser view", _view_menu.name)
+	_menu.set_item_tooltip(-1, "Gallery tiles or a compact list — the browser's view button and the Settings dialog share this key (applies on the next browser load).")
 	for i in THUMB_SIZES.size():
 		_thumb_menu.add_radio_check_item("%d px" % THUMB_SIZES[i], i)
 		_thumb_menu.set_item_checked(i, _es(SETTING_THUMB, 256) == THUMB_SIZES[i])
@@ -139,6 +152,12 @@ func _fill_menu() -> void:
 	_menu.add_icon_check_item(get_theme_icon("FileList", "EditorIcons"), "Show all files", Item.SHOW_FILES)
 	_menu.set_item_checked(-1, bool(_es(SETTING_FILES, false)))
 	_menu.set_item_tooltip(-1, "List text files, configs and scripts in the Assets view too.")
+	# The header's dock toggle as a menu check — same setting, same
+	# immediate reparent.
+	_menu.add_icon_check_item(get_theme_icon("GuiTabUnfloat", "EditorIcons"),
+		"Docked panel", Item.PANEL_DOCKED)
+	_menu.set_item_checked(-1, plugin.panel_mode() == plugin.PanelMode.DOCKED)
+	_menu.set_item_tooltip(-1, "Move the A2G panel into a native editor dock — position, floating and close then come from the dock's ⋮ menu.")
 	var has_dir := DirAccess.dir_exists_absolute(A2G_DIR)
 	_menu.add_icon_item(get_theme_icon("Folder", "EditorIcons"), "Show downloads folder", Item.OPEN_DIR)
 	if not has_dir:
@@ -196,6 +215,10 @@ func _on_id_pressed(id: int) -> void:
 			_set_es(SETTING_FILES, not bool(_es(SETTING_FILES, false)))
 		Item.TAB_LOGOS:
 			plugin.set_tab_logos(not plugin.tab_logos_enabled())
+		Item.PANEL_DOCKED:
+			plugin.set_panel_mode(plugin.PanelMode.EMBEDDED \
+				if plugin.panel_mode() == plugin.PanelMode.DOCKED \
+				else plugin.PanelMode.DOCKED)
 		Item.OPEN_DIR:
 			EditorInterface.get_file_system_dock().navigate_to_path(A2G_DIR)
 		Item.SETTINGS:
@@ -218,7 +241,7 @@ func _check_updates() -> void:
 	_update = {}
 	var req := HTTPRequest.new()
 	req.timeout = 15.0
-	add_child(req)
+	(plugin if plugin != null else self).add_child(req)
 	req.request_completed.connect(func(_result, code, _h, body):
 		req.queue_free()
 		var releases_url: String = plugin.SOURCES_URL + "/releases"

@@ -25,6 +25,8 @@ var _a2g_view: OptionButton
 var _a2g_thumb: OptionButton
 var _a2g_cap: OptionButton
 var _a2g_files: CheckBox
+var _a2g_panel: OptionButton
+var _a2g_tablogos: CheckBox
 
 
 ## Called by the menu once the plugin is known.
@@ -86,7 +88,9 @@ func setup(new_plugin: EditorPlugin) -> void:
 
 	_section("Assets2Godot", "Local index browser and the unified Assets tab.\nSaved in your editor settings and applies to all your projects.\nAlso in Editor Settings → Assets2Godot.")
 	_a2g_view = _options(["Grid", "List"])
-	_a2g_view.item_selected.connect(func(i): _set_es("assets2godot/browser_view", i))
+	# The browser's own persistence key — a2g_browser reads/writes
+	# browser_display_mode; anything else would be a dead setting.
+	_a2g_view.item_selected.connect(func(i): _set_es("assets2godot/browser_display_mode", i))
 	_row("Browser view", _a2g_view, "How the Assets2Godot index browser shows assets: gallery tiles or a compact list.\nThe browser toolbar's list/tile button changes the same setting.")
 	_a2g_thumb = _options(["128", "256", "512"])
 	_a2g_thumb.item_selected.connect(func(i): _set_es("assets2godot/thumb_size", [128, 256, 512][i]))
@@ -98,6 +102,13 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_a2g_files.text = "Show non-visual files by default"
 	_a2g_files.toggled.connect(func(on): _set_es("assets2godot/show_all_files", on))
 	_row("Show all files", _a2g_files, "Initial state of the Assets tab's 'Show all files' checkbox —\ntext files, configs and scripts that have no visual preview.")
+	_a2g_panel = _options(["Embedded (main screen)", "Docked"])
+	_a2g_panel.item_selected.connect(func(i): plugin.set_panel_mode(i))
+	_row("A2G panel", _a2g_panel, "Where the Assets2Godot panel opens.\nEmbedded keeps it inside its own main screen; Docked moves it into a native editor dock — the dock's ⋮ menu then offers dock position, floating and close, and the header button toggles the same setting.")
+	_a2g_tablogos = CheckBox.new()
+	_a2g_tablogos.text = "Show provider logos in the main tabs"
+	_a2g_tablogos.toggled.connect(plugin.set_tab_logos)
+	_row("Provider logos", _a2g_tablogos, "Marks BlendKit, Polyhaven and ambientCG tabs with their provider logo.\nOff keeps the tabs text-only like the editor's own — the A2G menu's 'Provider logos in tabs' toggles the same setting.")
 
 	# A sibling, as a child window would hide with Settings.
 	_blender_import_dialog = BlenderImportDialog.new()
@@ -119,10 +130,12 @@ func _load() -> void:
 	_uuid_names.select(GalleryApi.option_index(plugin.UUID_NAMES, plugin.uuid_names))
 	_port.select(maxi(0, ClientConnection.CLIENT_PORTS.find(plugin.preferred_port)))
 	_log_level.select(plugin.log_level)
-	_a2g_view.select(clampi(_es("assets2godot/browser_view", 0), 0, 1))
+	_a2g_view.select(clampi(_es("assets2godot/browser_display_mode", 0), 0, 1))
 	_a2g_thumb.select(maxi(0, [128, 256, 512].find(_es("assets2godot/thumb_size", 256))))
 	_a2g_cap.select(maxi(0, [50, 150, 300, 600, 1000].find(_es("assets2godot/scene_resource_cap", 300))))
 	_a2g_files.button_pressed = bool(_es("assets2godot/show_all_files", false))
+	_a2g_panel.select(clampi(plugin.panel_mode(), 0, 1))
+	_a2g_tablogos.button_pressed = plugin.tab_logos_enabled()
 
 
 ## Reads/writes the assets2godot/* editor settings — these rows have no

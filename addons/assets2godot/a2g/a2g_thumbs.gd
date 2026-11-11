@@ -16,18 +16,20 @@ extends Node
 ## scheme — so each file renders exactly once per content change.
 ##
 ## Usage: thumbs.request(payload, "/abs/path.glb") -> rendered(payload, tex)
-## or failed(payload, path) when nothing renderable came out — callers
-## fall back to the native preview queue on `failed`.
+## or failed(payload, path) when nothing renderable came out — the rig
+## runs as the fallback behind the native preview queue (a2g_browser's
+## `staged` route), so `failed` ends the chain at the kind icon.
 
 signal rendered(payload: Variant, texture: Texture2D)
 signal failed(payload: Variant, path: String)
 
 const DEFAULT_SIZE := 256
 const SETTING_SIZE := "assets2godot/thumb_size"
+const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
 const PER_FRAME := 1
 const CACHE_MAX := 256
 const CACHE_DIR := "a2g/thumbs"
-const IMAGE_EXTS := ["png", "jpg", "jpeg", "tga", "bmp", "webp", "exr", "hdr", "tif", "tiff", "svg"]
+const IMAGE_EXTS := ["png", "jpg", "jpeg", "tga", "bmp", "webp", "exr", "hdr", "svg"]
 
 var _viewport: SubViewport
 var _camera: Camera3D
@@ -37,8 +39,6 @@ var _queue: Array = []
 ## cache each one re-runs GLTFDocument, which makes the editor's importer
 ## log "can't reimport" noise for every external file every time.
 var _cache := {}
-## path → decoded Image for image items waiting on an edited preview.
-var _pending := {}
 var _size := DEFAULT_SIZE
 
 
@@ -88,6 +88,7 @@ func _ready() -> void:
 ## rendered() once done; files with no renderable content are skipped
 ## silently (the card keeps its placeholder).
 func request(payload: Variant, path: String) -> void:
+	_sync_size()
 	if _cache.has(path):
 		rendered.emit(payload, _cache[path])
 		return
@@ -99,8 +100,6 @@ func request(payload: Variant, path: String) -> void:
 	for it in _queue:
 		if it["path"] == path:
 			return
-	if _pending.has(path):
-		return
 	_queue.append({"payload": payload, "path": path})
 	set_process(true)
 
@@ -131,6 +130,22 @@ func _handle_image(item: Dictionary) -> void:
 		failed.emit(item["payload"], path)
 		return
 	_finish(path, img, item["payload"])
+
+
+## Picks up a changed thumb_size setting: resizes the render viewport
+## and drops in-memory hits — the disk cache re-keys itself via the
+## render size baked into filename and meta, so stale-size files never
+## count as hits.
+func _sync_size() -> void:
+	var es := EditorInterface.get_editor_settings()
+	var want := _size
+	if es and es.has_setting(SETTING_SIZE):
+		want = int(es.get_setting(SETTING_SIZE))
+	if want == _size:
+		return
+	_size = want
+	_viewport.size = Vector2i(_size * 2, _size * 2)
+	_cache.clear()
 
 
 func _decode_image(path: String) -> Image:
@@ -204,70 +219,17 @@ func _render_path(path: String) -> Image:
 
 
 ## GLTFDocument/FBXDocument generate_scene() yields ImporterMeshInstance3D
-## nodes in the editor — Node3D subclasses that draw nothing. Swaps every
-## node whose "mesh" property resolves through get_mesh() (ImporterMesh →
-## ArrayMesh) for a renderable MeshInstance3D, preserving transform,
-## children and sibling order. Returns the (possibly replaced) root.
+## nodes in the editor — Node3D subclasses that draw nothing. Shared with
+## the drop overlay's placement via A2GUI.resolve_importer_meshes.
 func _resolve_importer_meshes(root: Node) -> Node:
-	var out := root
-	var stack: Array[Node] = [root]
-	while not stack.is_empty():
-		var n: Node = stack.pop_back()
-		stack.append_array(n.get_children())
-		var n3d := n as Node3D
-		if n3d == null:
-			continue
-		var m: Variant = n3d.get("mesh")
-		if m == null or not m.has_method("get_mesh"):
-			continue
-		var converted: Variant = m.get_mesh()
-		if converted == null:
-			continue
-		var mi := MeshInstance3D.new()
-		mi.name = n3d.name
-		mi.transform = n3d.transform
-		mi.mesh = converted
-		for c in n3d.get_children():
-			n3d.remove_child(c)
-			mi.add_child(c)
-		var parent := n3d.get_parent()
-		if parent != null:
-			var idx := n3d.get_index()
-			parent.remove_child(n3d)
-			parent.add_child(mi)
-			parent.move_child(mi, idx)
-		else:
-			out = mi
-		n3d.free()
-	return out
+	return A2GUI.resolve_importer_meshes(root)
 
 
-## Combined AABB of the staged subtree in _holder space, duck-typed on
-## get_aabb() — ImporterMeshInstance3D (what GLTFDocument yields in the
-## editor) is a Node3D, not a VisualInstance3D.
+## Combined AABB of the staged subtree — A2GUI.world_aabb accumulates
+## local transforms, identical to the old global_transform math here
+## (the holder sits at identity, so staged space IS world space).
 func _world_aabb(root: Node) -> AABB:
-	var aabb := AABB()
-	var found := false
-	var stack: Array[Node] = [root]
-	while not stack.is_empty():
-		var n: Node = stack.pop_back()
-		var n3d := n as Node3D
-		if n3d != null:
-			var box: Variant = null
-			if n3d.has_method("get_aabb"):
-				box = n3d.get_aabb()
-			else:
-				# ImporterMeshInstance3D (GLTFDocument's editor node type)
-				# may lack a bound get_aabb — its mesh has one.
-				var m: Variant = n3d.get("mesh")
-				if m != null and m.has_method("get_aabb"):
-					box = m.get_aabb()
-			if box is AABB:
-				var sub: AABB = n3d.global_transform * box
-				aabb = sub if not found else aabb.merge(sub)
-				found = true
-		stack.append_array(n.get_children())
-	return aabb if found else AABB(Vector3(-0.5, -0.5, -0.5), Vector3.ONE)
+	return A2GUI.world_aabb(root)
 
 
 ## Verbatim framing from EditorMeshPreviewPlugin::generate — rotate the

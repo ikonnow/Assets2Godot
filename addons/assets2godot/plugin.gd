@@ -21,7 +21,9 @@ const SETTING_CLIENT_ENABLED = "blendkit/client/enabled"
 const SETTING_PORT = "blendkit/client/port"
 const SETTING_LOG_LEVEL = "blendkit/client/log_level"
 # Assets2Godot — local index browser and unified Assets tab.
-const SETTING_A2G_VIEW = "assets2godot/browser_view"
+# The browser persists its view under browser_display_mode — the same
+# key a2g_browser reads; registering an alias would be a dead setting.
+const SETTING_A2G_VIEW = "assets2godot/browser_display_mode"
 const SETTING_A2G_THUMB_SIZE = "assets2godot/thumb_size"
 const SETTING_A2G_SCENE_CAP = "assets2godot/scene_resource_cap"
 const SETTING_A2G_SHOW_FILES = "assets2godot/show_all_files"
@@ -29,6 +31,9 @@ const SETTING_A2G_SHOW_FILES = "assets2godot/show_all_files"
 const SETTING_A2G_PROVIDER = "assets2godot/providers/%s_enabled"
 # Opt-in provider logos inside the tabs — off keeps them text-only.
 const SETTING_A2G_TAB_LOGOS = "assets2godot/tab_logos"
+# Where the A2G panel lives: embedded in its main screen, or a native
+# editor dock (whose ⋮ menu then offers position, floating and close).
+const SETTING_A2G_PANEL_MODE = "assets2godot/panel_mode"
 # Tab logo render size — the editor's 16px glyph grid, capped per tab
 # via set_tab_icon_max_width so wide marks can't stretch the tab.
 const TAB_LOGO_PX := 16.0
@@ -50,6 +55,7 @@ const A2GContextPlugin = preload("res://addons/assets2godot/a2g/a2g_context_plug
 const A2GPolyhaven = preload("res://addons/assets2godot/a2g/a2g_polyhaven.gd")
 const A2GAmbientcg = preload("res://addons/assets2godot/a2g/a2g_ambientcg.gd")
 const A2GSettingsButton = preload("res://addons/assets2godot/a2g/a2g_settings_button.gd")
+const A2GSceneDrop = preload("res://addons/assets2godot/a2g/a2g_scene_drop.gd")
 const Auth = preload("res://addons/assets2godot/auth.gd")
 const BlenderImport = preload("res://addons/assets2godot/blender_import.gd")
 const ClientBinary = preload("res://addons/assets2godot/client_binary.gd")
@@ -60,6 +66,8 @@ const Icons = preload("res://addons/assets2godot/ui/icons.gd")
 
 
 enum LogLevel { ERROR, WARNING, INFO, VERBOSE, DEBUG, TRACE }
+## Where the A2G panel lives — the assets2godot/panel_mode setting.
+enum PanelMode { EMBEDDED, DOCKED }
 
 var log_level: int = LogLevel.INFO
 
@@ -137,24 +145,56 @@ var _a2g_button: Button
 var _a2g_dock: A2GDock
 var _ctx_fs: EditorContextMenuPlugin
 var _ctx_scene: EditorContextMenuPlugin
+## The EditorDock shell main_screen moves into while docked — untyped
+## because the class only exists on Godot 4.6+ (ClassDB instantiation
+## keeps this plugin parsing on older versions).
+var _a2g_dock_shell: Variant
+var _a2g_placeholder: Control
+var _dock_button: Button
+var _panel_docked := false
+## The remote-drop overlays parked inside the editor's own surfaces —
+## the 3D viewport's input surface and the FileSystem dock's list.
+var _drop_overlays: Array[Control] = []
 
-## The remote provider tabs in display order — "blendkit" is the
-## daemon-backed upstream gallery, the rest are in-plugin HTTP providers
-## (spec §3). Everything that lists providers — TabBar icons, the Sources
-## tree's remote rows, the settings menu's switches — shares this
-## registry; a new provider appends its key and registers its pane with
-## the same `_add_tab_pane(panes, pane, key)` call.
+## The remote providers in display order — alphabetical by title, the
+## one rule the TabBar, the Sources tree's remote rows and the settings
+## menu's switches all share. "blendkit" is the daemon-backed upstream
+## gallery, the rest are in-plugin HTTP providers (spec §3). A new
+## provider inserts its entry alphabetically and adds its pane to
+## init_gallery's registration dict — the array IS the order everywhere.
 const PROVIDERS := [
+	{"key": "ambientcg", "title": "ambientCG", "daemon": false},
 	{"key": "blendkit", "title": "BlendKit", "daemon": true},
 	{"key": "polyhaven", "title": "Polyhaven", "daemon": false},
-	{"key": "ambientcg", "title": "ambientCG", "daemon": false},
 ]
 ## key → pane, filled by _add_tab_pane as each provider pane registers.
 var _provider_panes := {}
+## The custom EditorResourcePreviewGenerator registered in _enter_tree.
+var _preview_gen: EditorResourcePreviewGenerator
 
 
 func _enter_tree() -> void:
+	# godotengine/godot#114067: on the gl_compatibility renderer the
+	# texture importer spins up a separate Vulkan/D3D12 device for GPU
+	# compression — that spinup crashes on some drivers (signal 11
+	# during a "detected as used in 3D" reimport of provider textures).
+	# Force CPU compression for the session; other renderers keep GPU.
+	if RenderingServer.get_current_rendering_method() == "gl_compatibility":
+		ProjectSettings.set_setting(
+			"rendering/textures/vram_compression/compress_with_gpu", false)
 	init_settings()
+	# The A2G preview generator fills the gaps the built-ins leave
+	# (external images, .glb/.gltf/.fbx) inside the native preview queue.
+	# request_draw_and_wait exists only since 4.6 (godot#96897) — on
+	# older editors the file wouldn't even parse, so it's never loaded
+	# there and a2g_browser's `staged` route falls back to the A2G rig.
+	var previewer := EditorInterface.get_resource_previewer()
+	var ver := Engine.get_version_info()
+	if previewer != null and (ver.major > 4 or (ver.major == 4 and ver.minor >= 6)):
+		var gen_script: Script = load("res://addons/assets2godot/a2g/a2g_preview_generator.gd")
+		if gen_script != null:
+			_preview_gen = gen_script.new()
+			previewer.add_preview_generator(_preview_gen)
 	startup_blend_enabled = BlenderImport.blend_import_enabled()
 	startup_blender_path = BlenderImport.blender_path()
 	log_info("Plugin enabled")
@@ -170,6 +210,9 @@ func _enter_tree() -> void:
 	add_child(auth)
 
 	init_gallery()
+	_install_drop_overlays()
+	if panel_mode() == PanelMode.DOCKED:
+		_undock_panel()
 	ProjectSettings.settings_changed.connect(load_settings)
 	EditorInterface.get_editor_settings().settings_changed.connect(load_settings)
 	if client_enabled:
@@ -179,6 +222,11 @@ func _enter_tree() -> void:
 # No unsubscribe here: on editor shutdown the request never reaches the
 # Client, as the HTTPRequest is freed with the plugin before it's sent.
 func _exit_tree() -> void:
+	if _preview_gen != null:
+		var previewer := EditorInterface.get_resource_previewer()
+		if previewer != null:
+			previewer.remove_preview_generator(_preview_gen)
+		_preview_gen = null
 	ProjectSettings.settings_changed.disconnect(load_settings)
 	EditorInterface.get_editor_settings().settings_changed.disconnect(load_settings)
 	if _ctx_fs:
@@ -187,6 +235,22 @@ func _exit_tree() -> void:
 	if _ctx_scene:
 		remove_context_menu_plugin(_ctx_scene)
 		_ctx_scene = null
+	for ov in _drop_overlays:
+		if is_instance_valid(ov):
+			ov.queue_free()
+	_drop_overlays.clear()
+	# Undock first — main_screen is freed below, the dock shell with it.
+	if _panel_docked:
+		if _a2g_dock_shell != null and has_method(&"remove_dock"):
+			call("remove_dock", _a2g_dock_shell)
+		elif _a2g_dock_shell == null and has_method(&"remove_control_from_docks"):
+			call("remove_control_from_docks", main_screen)
+	if _a2g_dock_shell != null:
+		_a2g_dock_shell.queue_free()
+		_a2g_dock_shell = null
+	if _a2g_placeholder != null:
+		_a2g_placeholder.queue_free()
+		_a2g_placeholder = null
 	# The children go with the plugin; the panes live in the main screen.
 	if main_screen:
 		main_screen.queue_free()
@@ -209,6 +273,12 @@ func _has_main_screen() -> bool:
 
 
 func _make_visible(visible: bool) -> void:
+	# Docked: the "A2G" screen entry shows a placeholder instead of an
+	# empty surface — the panel lives in a dock until it docks back.
+	if _panel_docked:
+		if _a2g_placeholder != null:
+			_a2g_placeholder.visible = visible
+		return
 	if main_screen:
 		main_screen.visible = visible
 
@@ -220,7 +290,7 @@ func _get_plugin_name() -> String:
 # Godot asks again on theme changes, so the icon follows the editor scale and
 # light/dark icon colors.
 func _get_plugin_icon() -> Texture2D:
-	return Icons.render_svg(A2G_ICON_PATH, EditorInterface.get_editor_scale(), true)
+	return Icons.render_svg_fit(A2G_ICON_PATH, 16.0 * EditorInterface.get_editor_scale(), true)
 
 
 const A2G_ICON_PATH := "res://addons/assets2godot/a2g/icon.svg"
@@ -267,6 +337,17 @@ func init_gallery() -> void:
 	_a2g_button.tooltip_text = "Assets2Godot — organize indexed and project assets."
 	_a2g_button.toggled.connect(_on_a2g_toggled)
 	header.add_child(_a2g_button)
+	# Last control, far right: detaches the whole panel into a native
+	# editor dock — the dock's own ⋮ menu then carries Dock Position,
+	# Make Floating and Close like every other dock.
+	_dock_button = Button.new()
+	_dock_button.name = "A2GDockToggle"
+	_dock_button.theme_type_variation = "FlatButton"
+	_dock_button.toggle_mode = true
+	_dock_button.tooltip_text = "Dock the A2G panel into the editor — position, floating and close come from the dock's own ⋮ menu."
+	_dock_button.toggled.connect(func(on): set_panel_mode(
+		PanelMode.DOCKED if on else PanelMode.EMBEDDED))
+	header.add_child(_dock_button)
 
 	# The pane stack: every child fills the content area, exactly one
 	# visible at a time.
@@ -333,7 +414,6 @@ func init_gallery() -> void:
 	gallery = gallery_scene.instantiate()
 	gallery.plugin = self
 	gallery.name = "BlendKit"
-	_add_tab_pane(panes, gallery, "blendkit")
 	# Right-click quick download on BlendKit cards too — the same compact
 	# tile remote-provider cards get, installed without upstream edits.
 	A2GUI.install_bk_quick_download(get_tree(), gallery)
@@ -342,13 +422,22 @@ func init_gallery() -> void:
 	var polyhaven := A2GPolyhaven.new()
 	polyhaven.plugin = self
 	polyhaven.name = "Polyhaven"
-	_add_tab_pane(panes, polyhaven, "polyhaven")
 	# ambientCG: second pure-GDScript provider — public v3 API, all-CC0
 	# catalog, downloads are extracted zip archives.
 	var ambientcg := A2GAmbientcg.new()
 	ambientcg.plugin = self
 	ambientcg.name = "ambientCG"
-	_add_tab_pane(panes, ambientcg, "ambientcg")
+	# Tab order is the PROVIDERS order — alphabetical by title; where a
+	# pane is constructed above doesn't matter, the registry decides.
+	var provider_panes := {
+		"ambientcg": ambientcg,
+		"blendkit": gallery,
+		"polyhaven": polyhaven,
+	}
+	for pd in PROVIDERS:
+		var pane: Control = provider_panes.get(pd.get("key", ""))
+		if pane != null:
+			_add_tab_pane(panes, pane, str(pd.get("key")))
 	main_screen.hide()
 	EditorInterface.get_editor_main_screen().add_child(main_screen)
 	# The A2G toggle on the right carries the FileSystem dock's own icon,
@@ -363,6 +452,13 @@ func init_gallery() -> void:
 	var accent := main_screen.get_theme_color(&"accent_color", &"Editor")
 	_a2g_button.add_theme_color_override("font_pressed_color", accent)
 	_a2g_button.add_theme_color_override("font_hover_pressed_color", accent)
+	# The dock toggle borrows the editor's own dock glyph (4.7's
+	# EditorDock icon; DistractionFree/GuiTab as older fallbacks).
+	for dock_icon in [&"EditorDock", &"DistractionFree", &"GuiTab"]:
+		var dic := main_screen.get_theme_icon(dock_icon, "EditorIcons")
+		if dic:
+			_dock_button.icon = dic
+			break
 	# A provider switched off in the settings menu starts hidden — the
 	# first visible tab is the startup selection, not hardcoded tab 0.
 	var first := _first_enabled_tab()
@@ -532,6 +628,131 @@ func _on_a2g_toggled(pressed: bool) -> void:
 		_show_tab(_tab_bar.current_tab)
 
 
+# MARK: panel docking — the whole A2G surface as a native editor dock
+
+## The assets2godot/panel_mode setting: 0 = embedded main screen, 1 =
+## a docked EditorDock whose own ⋮ menu (Dock Position / Make Floating
+## / Close) the editor provides like for every other dock.
+func panel_mode() -> int:
+	var es := EditorInterface.get_editor_settings()
+	if es and es.has_setting(SETTING_A2G_PANEL_MODE):
+		return int(es.get_setting(SETTING_A2G_PANEL_MODE))
+	return PanelMode.EMBEDDED
+
+
+## The header's dock toggle and the settings share this entry — the
+## setting persists, the reparent applies immediately.
+func set_panel_mode(mode: int) -> void:
+	var es := EditorInterface.get_editor_settings()
+	if es:
+		es.set_setting(SETTING_A2G_PANEL_MODE, mode)
+	if mode == PanelMode.DOCKED and not _panel_docked:
+		_undock_panel()
+	elif mode == PanelMode.EMBEDDED and _panel_docked:
+		_redock_panel()
+
+
+## Moves main_screen into an EditorDock — the editor then owns its tab,
+## position, floating and layout persistence (layout_key). On Godot
+## <4.6 without EditorDock the legacy dock call does the same job.
+func _undock_panel() -> void:
+	if _panel_docked or main_screen == null:
+		return
+	_panel_docked = true
+	if ClassDB.class_exists("EditorDock") and has_method(&"add_dock"):
+		_a2g_dock_shell = ClassDB.instantiate("EditorDock")
+		_a2g_dock_shell.set("title", "A2G")
+		_a2g_dock_shell.set("layout_key", "assets2godot")
+		# DOCK_SLOT_LEFT_UL — empty in the default layout, next to the
+		# Scene/FileSystem docks a dragged card comes from.
+		_a2g_dock_shell.set("default_slot", 0)
+		_a2g_dock_shell.set("available_layouts", 7)  # DOCK_LAYOUT_ALL
+		_a2g_dock_shell.set("global", true)
+		_a2g_dock_shell.set("closable", true)
+		var icon := _get_plugin_icon()
+		if icon != null:
+			_a2g_dock_shell.set("dock_icon", icon)
+		_a2g_dock_shell.set("force_show_icon", true)
+		main_screen.reparent(_a2g_dock_shell)
+		call("add_dock", _a2g_dock_shell)
+	else:
+		add_control_to_dock(DOCK_SLOT_LEFT_UL, main_screen)
+	main_screen.show()
+	_make_placeholder()
+	_refresh_dock_button()
+
+
+## Back to the main screen — the dock shell is discarded; docking again
+## rebuilds it (last position comes from the editor's layout, not us).
+func _redock_panel() -> void:
+	if not _panel_docked or main_screen == null:
+		return
+	_panel_docked = false
+	if _a2g_dock_shell != null:
+		if has_method(&"remove_dock"):
+			call("remove_dock", _a2g_dock_shell)
+		main_screen.reparent(EditorInterface.get_editor_main_screen())
+		_a2g_dock_shell.queue_free()
+		_a2g_dock_shell = null
+	else:
+		call("remove_control_from_docks", main_screen)
+		EditorInterface.get_editor_main_screen().add_child(main_screen)
+	if _a2g_placeholder != null:
+		_a2g_placeholder.hide()
+	_refresh_dock_button()
+	# The user asked for the surface — make it the active screen.
+	EditorInterface.set_main_screen_editor(_get_plugin_name())
+
+
+## What the A2G screen shows while the panel is docked elsewhere — the
+## mode is deactivated, the note says why and offers the way back.
+func _make_placeholder() -> void:
+	if _a2g_placeholder != null:
+		return
+	var edscale := EditorInterface.get_editor_scale()
+	var c := CenterContainer.new()
+	c.name = "A2GDockedPlaceholder"
+	var v := VBoxContainer.new()
+	v.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.add_theme_constant_override("separation", int(8 * edscale))
+	var l := Label.new()
+	l.text = "The A2G panel is docked — the dock's ⋮ menu moves, floats and closes it."
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(l)
+	var b := Button.new()
+	b.text = "Dock back to the main screen"
+	b.pressed.connect(func(): set_panel_mode(PanelMode.EMBEDDED))
+	v.add_child(b)
+	c.add_child(v)
+	c.hide()
+	EditorInterface.get_editor_main_screen().add_child(c)
+	_a2g_placeholder = c
+
+
+func _refresh_dock_button() -> void:
+	if _dock_button != null:
+		_dock_button.set_pressed_no_signal(_panel_docked)
+
+
+## The remote-drop overlays — one parked on the 3D viewport's input
+## surface, one on the FileSystem dock's list. Each re-attaches itself
+## to the current host inside _process, so a plain add_child under the
+## base control is all the lifecycle they need.
+func _install_drop_overlays() -> void:
+	var base := EditorInterface.get_base_control()
+	if base == null:
+		return
+	var scene_ov: Control = A2GSceneDrop.new()
+	scene_ov.parking = base
+	base.add_child(scene_ov)
+	_drop_overlays.append(scene_ov)
+	var fs_ov: Control = A2GSceneDrop.new()
+	fs_ov.mode = A2GSceneDrop.Mode.FILESYSTEM
+	fs_ov.parking = base
+	base.add_child(fs_ov)
+	_drop_overlays.append(fs_ov)
+
+
 ## Public entry: open the A2G organization surface; [param section]
 ## names a Sources-tree row to select ("scene" once the Assets tab is
 ## folded in — ignored until then).
@@ -650,6 +871,12 @@ func init_settings() -> void:
 	add_editor_setting(SETTING_A2G_SCENE_CAP, 300, PROPERTY_HINT_RANGE, "50,2000,50")
 	add_editor_setting(SETTING_A2G_SHOW_FILES, false)
 	add_editor_setting(SETTING_A2G_TAB_LOGOS, false)
+	add_editor_setting(SETTING_A2G_PANEL_MODE, PanelMode.EMBEDDED, PROPERTY_HINT_ENUM,
+		"Embedded,Docked")
+	# Provider download dirs — "" means the provider's own default root
+	# under res://Assets2Godot/<key>; the keys live in the tab classes.
+	add_editor_setting(A2GPolyhaven.SETTING_DIR, "")
+	add_editor_setting(A2GAmbientcg.SETTING_DIR, "")
 	for p in PROVIDERS:
 		add_editor_setting(SETTING_A2G_PROVIDER % str(p.get("key", "")), true)
 	# After registering, so migrated defaults aren't written to project.godot.
@@ -684,6 +911,12 @@ func load_settings() -> void:
 	set_uuid_names(ProjectSettings.get_setting(SETTING_UUID_NAMES))
 	set_preferred_port(editor_settings.get_setting(SETTING_PORT))
 	set_client_enabled(editor_settings.get_setting(SETTING_CLIENT_ENABLED))
+	if editor_settings.has_setting(SETTING_A2G_PANEL_MODE):
+		var want := int(editor_settings.get_setting(SETTING_A2G_PANEL_MODE))
+		# set_panel_mode() also writes the setting — syncing only on an
+		# actual mode mismatch keeps the settings_changed echo out.
+		if (want == PanelMode.DOCKED) != _panel_docked:
+			set_panel_mode(want)
 
 
 func _resolution_setting() -> String:
