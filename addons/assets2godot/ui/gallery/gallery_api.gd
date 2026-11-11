@@ -441,7 +441,13 @@ static func search_temp_dir(client_data_dir: String, asset_type: String) -> Stri
 static func post_json(parent: Node, url: String, body: Dictionary, timeout: float = 10.0) -> Dictionary:
 	var request := HTTPRequest.new()
 	request.timeout = timeout
-	parent.add_child(request)
+	# Anchor under the plugin when the caller can hand it over, else the
+	# tree root — a request parented inside the panel subtree dies on
+	# every dock reparent/close (EXIT_TREE cancels it without ever
+	# emitting request_completed) and hangs this await forever.
+	var host: Node = parent.get("plugin") if parent.get("plugin") is EditorPlugin \
+		else parent.get_tree().root
+	host.add_child(request)
 	var err := request.request(url, ["Content-Type: application/json"], HTTPClient.METHOD_POST, JSON.stringify(whole_floats_to_ints(body)))
 	if err != OK:
 		request.queue_free()

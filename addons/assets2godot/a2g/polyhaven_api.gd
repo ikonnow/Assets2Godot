@@ -79,6 +79,10 @@ static func files_url(slug: String) -> String:
 	return "%s/files/%s" % [API_BASE, slug.uri_encode()]
 
 
+static func info_url(slug: String) -> String:
+	return "%s/info/%s" % [API_BASE, slug.uri_encode()]
+
+
 static func web_url(slug: String) -> String:
 	return "https://polyhaven.com/a/%s" % slug
 
@@ -299,17 +303,23 @@ static func flatten_files(tree: Variant) -> Array:
 
 ## Index of the suggested download option: the top-ranked format nearest
 ## [param res_hint], else the first option. -1 on an empty list.
-static func pick_default(options: Array, res_hint := "2k") -> int:
+## [param fmt_hint] pins the format block (a model wants its gltf, not
+## the map-set entry that sorts first for every asset) — when the
+## block doesn't exist the hint is ignored.
+static func pick_default(options: Array, res_hint := "2k", fmt_hint := "") -> int:
 	if options.is_empty():
 		return -1
-	var fmt := str(options[0].get("key", "")).split("/")[0]
+	var fmt := fmt_hint
+	if fmt == "" or options.all(func(o):
+			return str(o.get("key", "")).split("/")[0] != fmt):
+		fmt = str(options[0].get("key", "")).split("/")[0]
 	var hint_rank := RES_ORDER.find(res_hint)
 	var best := -1
 	var best_d := 1 << 30
 	for i in options.size():
 		var parts := str(options[i].get("key", "")).split("/")
 		if parts.size() < 2 or parts[0] != fmt:
-			break # past the preferred format's block
+			continue # other format block — hinted blocks sort later
 		var d := 50
 		if RES_ORDER.has(parts[1]) and hint_rank >= 0:
 			d = absi(RES_ORDER.find(parts[1]) - hint_rank)
@@ -317,6 +327,20 @@ static func pick_default(options: Array, res_hint := "2k") -> int:
 			best_d = d
 			best = i
 	return best if best >= 0 else 0
+
+
+## The format block a default pick should land on for [param type]:
+## textures want the map-set, anything else the first real format —
+## set entries sort first for every asset, so without the hint a
+## model's default download is "JPG 2K" (no geometry at all).
+static func fmt_hint_for(type: String, options: Array) -> String:
+	if type == "texture":
+		return "set"
+	for o in options:
+		var f := str(o.get("key", "")).split("/")[0]
+		if f != "set":
+			return f
+	return ""
 
 
 ## String guard for API fields that arrive as explicit null — str(v)

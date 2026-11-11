@@ -278,7 +278,7 @@ func _fill_params() -> void:
 		var edscale := EditorInterface.get_editor_scale()
 		rows.append(["Score", "%.1f" % float(asset.get("score", 0)),
 			"Asset score = average quality × median complexity × 10",
-			Icons.render_svg(SCORE_ICON_PATH, edscale, true)])
+			Icons.render_svg_fit(SCORE_ICON_PATH, 16.0 * edscale, true)])
 		var average = asset.get("ratingsAverage", {})
 		if average is Dictionary and average.get("quality") != null:
 			rows.append(["Quality", "%.1f" % float(average.quality), "",
@@ -286,7 +286,7 @@ func _fill_params() -> void:
 		var median = asset.get("ratingsMedian", {})
 		if median is Dictionary and median.get("workingHours") != null:
 			rows.append(["Complexity", "%.1f" % float(median.workingHours), "",
-				Icons.render_svg(COMPLEXITY_ICON_PATH, edscale, true)])
+				Icons.render_svg_fit(COMPLEXITY_ICON_PATH, 16.0 * edscale, true)])
 	if asset.get("filesSize"):
 		rows.append(["File size", String.humanize_size(int(asset.filesSize))])
 	var p = asset.get("dictParameters", {})

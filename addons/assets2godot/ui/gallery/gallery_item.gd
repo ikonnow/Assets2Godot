@@ -84,6 +84,9 @@ func _ready() -> void:
 	focus_exited.connect(_update_frame)
 	thumb.resized.connect(Plans.place_badge.bind(plan_label))
 	_apply_theme()
+	if not _pending_thumb.is_empty():
+		set_thumb_texture(_pending_thumb[0], _pending_thumb[1])
+		_pending_thumb = []
 
 
 func _notification(what: int) -> void:
@@ -120,9 +123,16 @@ func setup_a2g(title: String, badge: String, type_icon: String, tip: String, pay
 ## COVERED look — for sources composed for it (HDRI pano previews).
 const A2G_THUMB_PAD := 16.0
 var _thumb_inset := false
+## A push arriving before _ready (downloads-pane cards get their thumb
+## queued before grid.add_child) can't touch the @onready refs yet —
+## buffer it and apply once the children exist.
+var _pending_thumb: Array = []
 
 func set_thumb_texture(texture: Texture2D, fill: bool = false) -> void:
 	_shown = "a2g"
+	if not is_node_ready():
+		_pending_thumb = [texture, fill]
+		return
 	if fill:
 		thumb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	else:

@@ -287,7 +287,7 @@ func _fetch_preview(url: String) -> void:
 		_req.queue_free()
 	_req = HTTPRequest.new()
 	_req.timeout = 30.0
-	add_child(_req)
+	get_tree().root.add_child(_req)
 	_req.request_completed.connect(func(_r, code, _h, body):
 		_req.queue_free()
 		_req = null
@@ -300,10 +300,7 @@ func _fetch_preview(url: String) -> void:
 		if err != OK:
 			err = img.load_jpg_from_buffer(body)
 		if err == OK:
-			# The real render replaces the card's low-res tile outright —
-			# one picture is enough, no thumb-vs-render strip.
 			_textures["primary"] = ImageTexture.create_from_image(img)
-			_textures.erase("thumb")
 			_set_frame("primary")
 			_rebuild_strip())
 	if _req.request(url, [AcgApi.UA_HEADER]) != OK:

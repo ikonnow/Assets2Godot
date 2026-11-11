@@ -56,6 +56,7 @@ const A2GPolyhaven = preload("res://addons/assets2godot/a2g/a2g_polyhaven.gd")
 const A2GAmbientcg = preload("res://addons/assets2godot/a2g/a2g_ambientcg.gd")
 const A2GSettingsButton = preload("res://addons/assets2godot/a2g/a2g_settings_button.gd")
 const A2GSceneDrop = preload("res://addons/assets2godot/a2g/a2g_scene_drop.gd")
+const AcgTerrain = preload("res://addons/assets2godot/a2g/a2g_terrain.gd")
 const Auth = preload("res://addons/assets2godot/auth.gd")
 const BlenderImport = preload("res://addons/assets2godot/blender_import.gd")
 const ClientBinary = preload("res://addons/assets2godot/client_binary.gd")
@@ -293,7 +294,7 @@ func _get_plugin_icon() -> Texture2D:
 	return Icons.render_svg_fit(A2G_ICON_PATH, 16.0 * EditorInterface.get_editor_scale(), true)
 
 
-const A2G_ICON_PATH := "res://addons/assets2godot/a2g/icon.svg"
+const A2G_ICON_PATH := "res://addons/assets2godot/a2g/a2g_icon.svg"
 
 
 # The A2G main screen: a header row — the TabBar of provider tabs on the
@@ -873,6 +874,15 @@ func init_settings() -> void:
 	add_editor_setting(SETTING_A2G_TAB_LOGOS, false)
 	add_editor_setting(SETTING_A2G_PANEL_MODE, PanelMode.EMBEDDED, PROPERTY_HINT_ENUM,
 		"Embedded,Docked")
+	# Heightmap-terrain drops (ambientCG terrain type): the mesh builds in
+	# real meters — XZ extent and peak relief — plus the grid it decimates
+	# to. A sibling OBJ's real spacing overrides the extent when present.
+	add_editor_setting(AcgTerrain.SETTING_EXTENT, AcgTerrain.DEFAULT_EXTENT_M,
+		PROPERTY_HINT_RANGE, "10,50000,10")
+	add_editor_setting(AcgTerrain.SETTING_RELIEF, AcgTerrain.DEFAULT_RELIEF_M,
+		PROPERTY_HINT_RANGE, "1,10000,1")
+	add_editor_setting(AcgTerrain.SETTING_RES, AcgTerrain.GRID_RES,
+		PROPERTY_HINT_ENUM, "129,257,513,1025")
 	# Provider download dirs — "" means the provider's own default root
 	# under res://Assets2Godot/<key>; the keys live in the tab classes.
 	add_editor_setting(A2GPolyhaven.SETTING_DIR, "")

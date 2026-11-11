@@ -23,7 +23,6 @@ enum Item {
 
 const PH_ICON_PATH = "res://addons/assets2godot/logo/polyhaven-icon.svg"
 const USER_ICON_PATH = "res://addons/assets2godot/ui/icons/user.svg"
-const PH_ICON_SVG_SIZE := 1250.0
 const PH_URL := "https://polyhaven.com"
 const PH_GALLERY_URL := "https://polyhaven.com/gallery"
 const PH_CONTRIBUTE_URL := "https://polyhaven.com/contribute"
@@ -108,7 +107,7 @@ func refresh() -> void:
 	var key := str(edscale)
 	if key != _logo_key:
 		_logo_key = key
-		_logo.texture = Icons.render_svg(PH_ICON_PATH, LOGO_SIZE * edscale / PH_ICON_SVG_SIZE)
+		_logo.texture = Icons.render_svg_fit(PH_ICON_PATH, LOGO_SIZE * edscale)
 	# Bottom right corner of the logo, half outside like a badge.
 	var dot_size := Vector2.ONE * (DOT_RADIUS + 1.5) * 2 * edscale
 	_dot.position = logo_size - dot_size * 0.6
@@ -197,7 +196,7 @@ func _fill_menu() -> void:
 	_menu.add_icon_item(get_theme_icon("Favorites", "EditorIcons"), "License: CC0", Item.LICENSE)
 	_menu.set_item_tooltip(-1, PH_LICENSE_URL + " — free for any use")
 	_menu.add_separator()
-	_menu.add_icon_item(_mono_icon(PH_ICON_PATH, 16, PH_ICON_SVG_SIZE), "polyhaven.com", Item.WEBSITE)
+	_menu.add_icon_item(_mono_icon(PH_ICON_PATH), "polyhaven.com", Item.WEBSITE)
 	_menu.set_item_tooltip(-1, PH_URL)
 	_menu.add_icon_item(get_theme_icon("ImageTexture", "EditorIcons"), "Community gallery", Item.GALLERY)
 	_menu.set_item_tooltip(-1, PH_GALLERY_URL + " — renders shared by the community")
@@ -250,8 +249,7 @@ func _on_id_pressed(id: int) -> void:
 			OS.shell_open(plugin.ISSUES_URL)
 
 
-## Monochrome 16 px SVG icon matching the editor icons, rendered like the
-## plugin's tab icon. size is in unscaled pixels; vb is the source SVG's
-## viewBox side (16 for editor-style icons, 1250 for the PH mark).
-func _mono_icon(path: String, size := 16, vb := 16.0) -> Texture2D:
-	return Icons.render_svg(path, size * EditorInterface.get_editor_scale() / vb, true)
+## Monochrome 16 px SVG icon matching the editor icons — content-fit
+## rendering, so the source file's canvas size doesn't matter.
+func _mono_icon(path: String, size := 16) -> Texture2D:
+	return Icons.render_svg_fit(path, size * EditorInterface.get_editor_scale(), true)

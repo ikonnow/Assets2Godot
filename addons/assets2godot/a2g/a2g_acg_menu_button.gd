@@ -23,7 +23,6 @@ enum Item {
 
 const ACG_ICON_PATH = "res://addons/assets2godot/logo/ambientcg-icon.svg"
 const USER_ICON_PATH = "res://addons/assets2godot/ui/icons/user.svg"
-const ACG_ICON_SVG_SIZE := 4096.0
 const ACG_URL := "https://ambientcg.com"
 const ACG_BROWSE_URL := "https://ambientcg.com/list"
 const ACG_API_URL := "https://docs.ambientcg.com/api/v3/"
@@ -107,7 +106,7 @@ func refresh() -> void:
 		_logo_key = key
 		# The mark is monochrome (ambientCG ships it as a silhouette), so it
 		# follows the editor-icon convention: light on dark themes, dark on light.
-		_logo.texture = Icons.render_svg(ACG_ICON_PATH, LOGO_SIZE * edscale / ACG_ICON_SVG_SIZE, true)
+		_logo.texture = Icons.render_svg_fit(ACG_ICON_PATH, LOGO_SIZE * edscale, true)
 	# Bottom right corner of the logo, half outside like a badge.
 	var dot_size := Vector2.ONE * (DOT_RADIUS + 1.5) * 2 * edscale
 	_dot.position = logo_size - dot_size * 0.6
@@ -196,7 +195,7 @@ func _fill_menu() -> void:
 	_menu.add_icon_item(get_theme_icon("Favorites", "EditorIcons"), "License: CC0", Item.LICENSE)
 	_menu.set_item_tooltip(-1, ACG_LICENSE_URL + " — free for any use")
 	_menu.add_separator()
-	_menu.add_icon_item(_mono_icon(ACG_ICON_PATH, 16, ACG_ICON_SVG_SIZE), "ambientcg.com", Item.WEBSITE)
+	_menu.add_icon_item(_mono_icon(ACG_ICON_PATH), "ambientcg.com", Item.WEBSITE)
 	_menu.set_item_tooltip(-1, ACG_URL)
 	_menu.add_icon_item(get_theme_icon("ImageTexture", "EditorIcons"), "Browse assets", Item.BROWSE)
 	_menu.set_item_tooltip(-1, ACG_BROWSE_URL + " — the site's own asset list")
@@ -237,8 +236,7 @@ func _on_id_pressed(id: int) -> void:
 			OS.shell_open(plugin.ISSUES_URL)
 
 
-## Monochrome 16 px SVG icon matching the editor icons, rendered like the
-## plugin's tab icon. size is in unscaled pixels; vb is the source SVG's
-## viewBox side (16 for editor-style icons, 4096 for the ACG mark).
-func _mono_icon(path: String, size := 16, vb := 16.0) -> Texture2D:
-	return Icons.render_svg(path, size * EditorInterface.get_editor_scale() / vb, true)
+## Monochrome 16 px SVG icon matching the editor icons — content-fit
+## rendering, so the source file's canvas size doesn't matter.
+func _mono_icon(path: String, size := 16) -> Texture2D:
+	return Icons.render_svg_fit(path, size * EditorInterface.get_editor_scale(), true)

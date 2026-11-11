@@ -288,7 +288,7 @@ func _on_id_pressed(id: int) -> void:
 ## Monochrome 16 px SVG icon matching the editor icons, rendered like the
 ## plugin's tab icon. size is in unscaled pixels.
 func _mono_icon(path: String, size := 16) -> Texture2D:
-	return Icons.render_svg(path, size * EditorInterface.get_editor_scale() / 16.0, true)
+	return Icons.render_svg_fit(path, size * EditorInterface.get_editor_scale(), true)
 
 
 ## The star of the plan item in the plan's color, when it stands out on the

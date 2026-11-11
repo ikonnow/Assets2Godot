@@ -345,8 +345,12 @@ static func option_label(entry: Dictionary) -> String:
 ## The asset's downloads array → flat option rows
 ## [{key,label,url,size,total_size,ext,res,attr,includes:{}}] sorted
 ## FMT_ORDER → resolution → quality → stills-before-animated. Companion
-## files don't exist here (zips are self-contained), includes stays {}.
-static func flatten_files(raw: Variant) -> Array:
+## files don't exist here (zips are self-contained) — except terrains:
+## [param asset_type] "terrain" rewrites each EXR entry into the bundle
+## the site means by "download a terrain" — heightmap EXR primary with
+## its same-res JPG maps zip riding as an includes companion — and
+## reorders it to the front, since the EXR is the asset's core payload.
+static func flatten_files(raw: Variant, asset_type := "") -> Array:
 	var out := []
 	for e: Variant in parse_downloads(raw):
 		if not e is Dictionary or not e.has("url"):
@@ -374,7 +378,51 @@ static func flatten_files(raw: Variant) -> Array:
 	out.sort_custom(func(a, b): return a._rank < b._rank)
 	for o in out:
 		o.erase("_rank")
+	if asset_type == "terrain":
+		out = _bundle_terrain(out)
 	return out
+
+
+## Terrain option reshaping — see flatten_files. The JPG zip of the
+## EXR's resolution rides along as an includes companion (nearest res
+## when the exact one is missing); total_size and label reflect the
+## real fetch. EXR bundles move to the front so res_hint picks them.
+static func _bundle_terrain(options: Array) -> Array:
+	var jpg_by_res := {}
+	var jpg_all := []
+	for e in options:
+		if str(e.get("ext", "")) == "zip" and _fmt_of(e) == "jpg":
+			var res := str((e.get("parsed", {}) as Dictionary).get("res", ""))
+			jpg_by_res[res] = e
+			jpg_all.append(e)
+	var bundles := []
+	for e in options:
+		if str(e.get("ext", "")) != "exr":
+			continue
+		var res := str((e.get("parsed", {}) as Dictionary).get("res", ""))
+		var zip: Variant = jpg_by_res.get(res)
+		if zip == null:
+			# Nearest-res JPG set when the exact one doesn't ship.
+			var best_d := 1 << 30
+			for z in jpg_all:
+				var d := absi(_res_rank(str((z.get("parsed", {}) as Dictionary).get("res", ""))) \
+					- _res_rank(res))
+				if d < best_d:
+					best_d = d
+					zip = z
+		if zip != null:
+			var rel := file_basename(str(zip.get("url", "")))
+			if not rel.is_empty():
+				e["includes"] = {rel: str(zip["url"])}
+				e["total_size"] = int(e.get("size", 0)) + int(zip.get("size", 0))
+				var exr_label := option_label(e)
+				e["label"] = "%s + maps (%s)" % [exr_label, short_size(int(e["total_size"]))]
+		bundles.append(e)
+	if bundles.is_empty():
+		return options
+	for e in bundles:
+		options.erase(e)
+	return bundles + options
 
 
 ## Index of the suggested option: the top-ranked format nearest

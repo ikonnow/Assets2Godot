@@ -30,6 +30,9 @@ var _dir_dialog: EditorFileDialog
 ## provider name → its root-level TreeItem, so scan results nest under
 ## their provider like an outliner instead of flooding the tree root.
 var _provider_items := {}
+## Toolbar-mode status dot — _status's text clipped to a stray letter in
+## the shared toolbar, so the full line rides on this icon's tooltip.
+var _status_icon: TextureRect
 
 
 func _ready() -> void:
@@ -65,7 +68,7 @@ func _ready() -> void:
 	_refresh.icon = _icon("Reload")
 	_refresh.flat = true
 	_refresh.pressed.connect(_on_refresh)
-	_scan = _head_button(host, "", "Walk the configured roots and index their assets.")
+	_scan = _head_button(host, "", "Index the files in all configured roots so they show up in the browser.")
 	_scan.icon = _icon("Play")
 	_scan.flat = true
 	_scan.pressed.connect(_on_scan)
@@ -76,11 +79,15 @@ func _ready() -> void:
 	# line must not widen the split panel's minimum (the FileSystem dock's
 	# tree side goes to ~40px).
 	_status.clip_text = true
-	# With the shared toolbar the status joins the sources cluster — the
-	# native tree pane is pure tree with no chrome lines inside.
-	(toolbar_parent if toolbar_parent != null else vbox).add_child(_status)
+	# Shared toolbar: the text label would clip to a stray letter — a
+	# status dot carries the same info on its tooltip instead.
+	_status_icon = TextureRect.new()
+	_status_icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
 	if toolbar_parent != null:
+		toolbar_parent.add_child(_status_icon)
 		host.add_child(VSeparator.new())
+	else:
+		vbox.add_child(_status)
 
 	_tree = Tree.new()
 	_tree.hide_root = true
@@ -140,6 +147,16 @@ func _update_state() -> void:
 	var connected: bool = plugin.connection != null and plugin.connection.is_client_connected()
 	_status.text = "Client: %s (port %s)" % [plugin.connection.status_text(), plugin.connection.port] if plugin.connection else "Client: unavailable"
 	_status.tooltip_text = _status.text
+	if _status_icon != null:
+		_status_icon.tooltip_text = _status.text
+		# StatusIndicator + modulate is the editor's own status-light
+		# convention (the export preset list colors the same dot green/
+		# yellow/red via success/warning/error theme colors).
+		_status_icon.texture = _icon("StatusIndicator")
+		var col := get_theme_color("success_color" if connected else "error_color", "Editor")
+		if col == Color.BLACK:
+			col = Color(0.45, 0.95, 0.5) if connected else Color(0.95, 0.47, 0.42)
+		_status_icon.modulate = col
 	_refresh.disabled = not connected
 	_scan.disabled = not connected
 	_add.disabled = not connected
@@ -203,7 +220,7 @@ func _post(endpoint: String, body: Dictionary, cb: Callable) -> void:
 
 func _request(endpoint: String, method: int, body, cb: Callable) -> void:
 	var req := HTTPRequest.new()
-	add_child(req)
+	(plugin if plugin != null else self).add_child(req)
 	req.request_completed.connect(func(_result, code, _h, resp_body):
 		req.queue_free()
 		var data = JSON.parse_string(resp_body.get_string_from_utf8()) if code == 200 else null

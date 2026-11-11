@@ -19,6 +19,7 @@ var _dl_btn: Button
 var _note: Label
 var _actions: HBoxContainer
 var _entry := {}
+var _card: Control
 
 
 func _ready() -> void:
@@ -62,6 +63,7 @@ func _ready() -> void:
 ## like the context menu and kept on screen like polygon_filter does.
 func open_for(card: Control, entry: Dictionary) -> void:
 	_entry = entry
+	_card = card
 	var edscale := EditorInterface.get_editor_scale()
 	_title.text = str(entry.get("remote_title", entry.get("remote_slug", "")))
 	_title.tooltip_text = _title.text
@@ -74,9 +76,19 @@ func open_for(card: Control, entry: Dictionary) -> void:
 	_set_note("")
 	_refresh_state()
 	reset_size()
+	# Don't trust reset_size() alone: contents_min is frozen at popup
+	# time, so a transiently long state note (a download's error message
+	# can carry full paths/curl output) would stretch the tile across
+	# the whole pane and never shrink back — cap it to tile proportions.
+	size = get_contents_minimum_size()
+	var window := card.get_window()
+	size.x = mini(size.x, window.size.x)
+	size.y = mini(size.y, mini(window.size.y, int(240 * edscale)))
 	var pos: Vector2 = card.get_screen_position() + card.get_local_mouse_position() \
 		+ Vector2.ONE * 4 * edscale
-	var window := get_window()
+	# Clamp against the window hosting the card — get_window() on a
+	# Window-derived node returns the node itself (position 0,0), which
+	# would pin the tile to the monitor's top-left corner.
 	pos.x = clampf(pos.x, window.position.x, window.position.x + window.size.x - size.x)
 	pos.y = clampf(pos.y, window.position.y, window.position.y + window.size.y - size.y)
 	popup(Rect2i(Vector2i(pos), size))
@@ -125,7 +137,12 @@ func _refresh_state() -> void:
 
 
 func _set_note(text: String) -> void:
-	_note.text = text
+	# A state note may carry a download's raw error (paths, curl output)
+	# — the tile stays a compact tile: a few wrapped lines here, the
+	# whole message on hover, like the editor's own truncated labels.
+	const NOTE_MAX := 160
+	_note.text = text.left(NOTE_MAX - 1) + "…" if text.length() > NOTE_MAX else text
+	_note.tooltip_text = text
 	_note.visible = not text.is_empty()
 
 
@@ -160,9 +177,33 @@ func _rebuild_actions() -> void:
 		_actions.add_child(_icon_btn("ActionCopy", "Copy page URL",
 			func(): DisplayServer.clipboard_set(url)))
 	var dir_cb: Variant = _entry.get("remote_dir")
-	if dir_cb is Callable and str(dir_cb.call()) != "":
+	var dir := str(dir_cb.call()) if dir_cb is Callable else ""
+	if not dir.is_empty():
 		_actions.add_child(_icon_btn("Folder", "Show in File Manager",
-			func(): OS.shell_show_in_file_manager(str(dir_cb.call()))))
+			func(): OS.shell_show_in_file_manager(dir)))
+		var delete_cb: Variant = _entry.get("remote_delete")
+		if delete_cb is Callable:
+			_actions.add_child(_icon_btn("Remove",
+				"Delete downloaded files (moves to system trash)",
+				func(): _confirm_delete(dir, delete_cb)))
+
+
+## The destructive action never runs silently: a confirm dialog in the
+## card's own window (parenting it to this transient tile would hide the
+## dialog with the tile) — same convention as the FileSystem dock.
+func _confirm_delete(dir: String, delete_cb: Callable) -> void:
+	hide()
+	var confirm := ConfirmationDialog.new()
+	confirm.title = "Delete downloaded files"
+	confirm.dialog_text = "Delete the downloaded files for \"%s\"?\n%s\n\nThe folder is moved to the system trash." \
+		% [_title.text, dir]
+	confirm.ok_button_text = "Delete"
+	confirm.confirmed.connect(func():
+		delete_cb.call()
+		confirm.queue_free())
+	confirm.canceled.connect(confirm.queue_free)
+	(_card if is_instance_valid(_card) else get_tree().root).add_child(confirm)
+	confirm.popup_centered()
 
 
 func _icon_btn(icon_name: StringName, tooltip: String, on_press: Callable) -> Button:

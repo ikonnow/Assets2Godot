@@ -91,6 +91,11 @@ var _dl_dest := ""
 var _dl_req: HTTPRequest
 var _dl_done := {}
 var _dl_zips: Array = []
+## Byte accounting for the drop ghost's progress box: the queued
+## option's total_size and the bytes of already-completed queue jobs —
+## the live job adds _dl_req.get_downloaded_bytes() on top.
+var _dl_total := 0
+var _dl_done_bytes := 0
 ## Cards outside _cards that still want their slug's thumbnail — the A2G
 ## downloads surface's tiles, kept weak-ish by pruning in _push_thumb.
 var _thumb_watchers := {}
@@ -184,13 +189,14 @@ func _ready() -> void:
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	fbar.add_child(_status)
 
+	var margin := A2GUI.make_library_margin()
+	vbox.add_child(margin)
 	_scroll = A2GUI.make_scroll()
-	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin.add_child(_scroll)
 	_border = A2GUI.make_scroll_border()
 	_scroll.add_child(_border)
 	_grid = A2GUI.make_grid()
 	_border.add_child(_grid)
-	vbox.add_child(_scroll)
 	_scroll.resized.connect(func(): A2GUI.update_columns(_scroll, _grid, _border))
 
 	_empty = Label.new()
@@ -316,7 +322,7 @@ func _fetch_url(url: String, cb: Callable, track_state := false) -> void:
 	req.timeout = 60.0
 	# Off the main thread — catalog pages run to ~6MB of JSON each.
 	req.use_threads = true
-	add_child(req)
+	(plugin if plugin != null else self).add_child(req)
 	req.request_completed.connect(func(_result, code, _h, body):
 		req.queue_free()
 		if track_state:
@@ -522,11 +528,18 @@ func _make_card(a: Dictionary, is_downloaded := false) -> Control:
 		{"remote_slug": slug, "remote_title": str(a.get("name", slug)),
 			"remote_url": AcgApi.web_url(slug),
 			"remote_site": "ambientcg.com",
-			"remote_options": Callable(self, "_remote_options_for").bind(slug),
-			"remote_download": Callable(self, "_remote_download").bind(slug),
-			"remote_state": Callable(self, "_remote_state").bind(slug),
+			# Contract arg comes FIRST, the bound slug last — .bind(slug)
+			# would land the slug in the wrong slot and type-error the
+			# call (options/download/state all take one contract arg).
+			"remote_options": func(cb: Callable): _remote_options_for(slug, cb),
+			"remote_download": func(d): _remote_download(slug, d),
+			"remote_state": func(d): _remote_state(slug, d),
 			"remote_dir": Callable(self, "_downloaded_dir").bind(slug),
-			"remote_details": Callable(self, "_show_details").bind(slug)})
+			"remote_delete": Callable(self, "_remote_delete").bind(slug),
+			"remote_details": Callable(self, "_show_details").bind(slug),
+			"remote_progress": Callable(self, "_remote_progress").bind(slug),
+			"remote_dimensions": null,
+			"remote_kind": str(a.get("type", ""))})
 	card.connect("selected", func(_asset): _show_details(slug))
 	card.call("set_downloaded", is_downloaded)
 	return card
@@ -634,7 +647,9 @@ func _push_thumb(slug: String, tex: Texture2D) -> void:
 	if not _thumb_watchers.has(slug):
 		return
 	var alive := []
-	for c: Control in _thumb_watchers[slug]:
+	# Untyped loop var: a stale freed ref would fail the typed assignment
+	# before is_instance_valid ever gets to prune it.
+	for c in _thumb_watchers[slug]:
 		if is_instance_valid(c):
 			c.call("set_thumb_texture", tex, false)
 			alive.append(c)
@@ -659,7 +674,7 @@ func _pump_thumbs() -> void:
 		# Transfers off the main thread — without it the pump competes
 		# with the 500-card rebuild for frame time.
 		req.use_threads = true
-		add_child(req)
+		(plugin if plugin != null else self).add_child(req)
 		req.request_completed.connect(func(_r, code, _h, body):
 			req.queue_free()
 			_thumb_active -= 1
@@ -691,7 +706,8 @@ func _show_details(slug: String) -> void:
 		return
 	_status.text = "Fetching files for %s…" % str(asset.get("name", slug))
 	_fetch_url(AcgApi.files_url(slug), func(text):
-		var options := AcgApi.flatten_files(JSON.parse_string(text))
+		var options := AcgApi.flatten_files(JSON.parse_string(text),
+			str(asset.get("type", "")))
 		var thumb: Texture2D = _thumb_cache.get(str(asset.get("thumbnail_url", "")))
 		_details.state_getter = _dl_state_for.bind(slug)
 		_details.show_asset(asset, options, thumb, _res_hint)
@@ -736,7 +752,8 @@ func _remote_options_for(slug: String, cb: Callable) -> void:
 		answer.call(_files_cache[slug])
 		return
 	_fetch_url(AcgApi.files_url(slug), func(text):
-		var options := AcgApi.flatten_files(JSON.parse_string(text))
+		var options := AcgApi.flatten_files(JSON.parse_string(text),
+			str(_asset_by_slug(slug).get("type", "")))
 		_files_cache[slug] = options
 		answer.call(options))
 
@@ -761,6 +778,56 @@ func _remote_state(slug: String, _data: Variant) -> Dictionary:
 		"note": "" if this else "A download is running — wait for it to finish."}
 
 
+## The tile's Delete action: trash the asset's own folder under the
+## download target — trash_downloaded_dir refuses anything not strictly
+## inside _target_dir(), and an in-flight job on this slug can't have
+## its files pulled out from under it. Card badge, details popup and
+## the downloads pane all re-read disk state via the rescan.
+func _remote_delete(slug: String) -> bool:
+	if str(_dl_asset.get("slug", "")) == slug and (_dl_req != null or _converting):
+		_status.text = "A download is running — wait for it to finish."
+		return false
+	if not A2GUI.trash_downloaded_dir(_downloaded_dir(slug), _target_dir()):
+		return false
+	_dl_done.erase(slug)
+	var card: Control = _cards.get(slug)
+	if is_instance_valid(card):
+		card.call("set_downloaded", false)
+	if _details.visible and str(_details.asset.get("slug", "")) == slug:
+		_details.refresh_state()
+	_status.text = "Deleted %s (moved to trash)" % slug
+	# filesystem_changed refreshes the downloads pane even for external
+	# targets — its refresh() re-reads the disk listing.
+	EditorInterface.get_resource_filesystem().scan()
+	return true
+
+
+## The drop overlay's progress source: real byte fraction of the
+## queued download when this slug is the active job (0..1), 1.0 for a
+## finished one, -1.0 when the queue is busy elsewhere or the total is
+## unknown — the box stays empty/idle rather than lying about progress.
+func _remote_progress(slug: String) -> float:
+	# A running job for this slug outranks _dl_done — a repair or
+	# re-download must show its own fraction (<1.0 until _dl_done;
+	# got == total already while post-download conversion still moves
+	# files), or the drop poll would see "finished" mid-download and
+	# abort as "produced no usable files".
+	if str(_dl_asset.get("slug", "")) == slug \
+			and (_dl_req != null or _converting):
+		var got := _dl_done_bytes
+		if _dl_req != null:
+			got += _dl_req.get_downloaded_bytes()
+		if _dl_total <= 0:
+			return -1.0
+		return clampf(float(got) / float(_dl_total), 0.0, 0.999)
+	if _dl_done.has(slug):
+		return 1.0
+	# Not the running job — disk state answers (same truth remote_dir
+	# reports): a folder from an earlier session is a finished
+	# download, otherwise nothing has landed yet.
+	return 1.0 if _downloaded_dir(slug) != "" else -1.0
+
+
 # MARK: download
 
 ## Shared start for the quick tile's remote_download and the popup's
@@ -780,6 +847,8 @@ func _start_download(asset: Dictionary, option: Dictionary) -> void:
 	_dl_queue = [{"url": str(option.get("url", "")), "rel": AcgApi.file_basename(str(option.get("url", "")))}]
 	for rel in option.get("includes", {}):
 		_dl_queue.append({"url": str(option["includes"][rel]), "rel": str(rel)})
+	_dl_total = int(option.get("total_size", 0))
+	_dl_done_bytes = 0
 	_dl_next()
 	if _details.visible and str(_details.asset.get("slug", "")) == str(asset.get("slug", "")):
 		_details.refresh_state()
@@ -797,7 +866,28 @@ func _dl_next() -> void:
 		_dl_next()
 		return
 	DirAccess.make_dir_recursive_absolute(dest.get_base_dir())
-	_dl_send(str(job.get("url", "")), dest, 0)
+	var url := str(job.get("url", ""))
+	# ambientcg.com/get sits behind a stricter Cloudflare rule that
+	# rejects Godot's mbedTLS ClientHello (400 invalid_request — curl
+	# and Schannel pass, OpenSSL gets 403). The CDN behind the
+	# redirect accepts us, so resolve that one hop via the system
+	# curl and let HTTPRequest stream the real file.
+	if "ambientcg.com/get" in url:
+		url = _resolve_get(url)
+	_dl_send(url, dest, 0)
+
+
+## Resolve a /get URL's redirect target with the system curl (Windows
+## ships curl.exe since 1809). Blocks ~300ms once per file — nothing
+## next to a multi-MB download. Falls back to the input when curl is
+## absent or the answer wasn't a redirect.
+func _resolve_get(url: String) -> String:
+	var out := []
+	OS.execute("curl", ["-s", "-I", "-o",
+		"NUL" if OS.has_feature("windows") else "/dev/null",
+		"-w", "%{redirect_url}", url], out, true)
+	var loc := str(out[0]).strip_edges() if out.size() > 0 else ""
+	return loc if loc.begins_with("http") else url
 
 
 ## One staged download to [param dest].part. ambientcg.com/get answers
@@ -809,8 +899,9 @@ func _dl_send(url: String, dest: String, redirs: int) -> void:
 	_dl_req.timeout = 300.0
 	_dl_req.use_threads = true
 	_dl_req.download_file = dest + ".part"
-	add_child(_dl_req)
+	(plugin if plugin != null else self).add_child(_dl_req)
 	_dl_req.request_completed.connect(func(result, code, headers, _b):
+		var got := _dl_req.get_downloaded_bytes()
 		_dl_req.queue_free()
 		_dl_req = null
 		if code in [301, 302, 303, 307, 308] and redirs < MAX_REDIRECTS:
@@ -830,6 +921,7 @@ func _dl_send(url: String, dest: String, redirs: int) -> void:
 			return
 		if dest.get_extension().to_lower() == "zip":
 			_dl_zips.append(dest)
+		_dl_done_bytes += got
 		_dl_queue.pop_front()
 		_dl_next())
 	# raw redirect paths carry spaces/^ — encode_url before requesting
@@ -1024,7 +1116,7 @@ func _fetch_roots() -> void:
 
 func _fetch_client(endpoint: String, cb: Callable) -> void:
 	var req := HTTPRequest.new()
-	add_child(req)
+	(plugin if plugin != null else self).add_child(req)
 	req.request_completed.connect(func(_r, code, _h, body):
 		req.queue_free()
 		cb.call(JSON.parse_string(body.get_string_from_utf8()) if code == 200 else null))
@@ -1034,7 +1126,7 @@ func _fetch_client(endpoint: String, cb: Callable) -> void:
 
 func _post_client(endpoint: String, body: Dictionary) -> void:
 	var req := HTTPRequest.new()
-	add_child(req)
+	(plugin if plugin != null else self).add_child(req)
 	req.request_completed.connect(func(_a, _b, _c, _d): req.queue_free())
 	if req.request(plugin.connection.client_url(endpoint),
 			["Content-Type: application/json"], HTTPClient.METHOD_POST,
