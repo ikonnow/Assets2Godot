@@ -22,8 +22,14 @@
     </a>
   </p>
   <p>
-    <img src="img/Assets2Godot_ambientCG.png" width="844"
-      alt="Assets2Godot ambientCG tab — provider tabs, filter row and CC0 asset cards in the Godot editor">
+    <img src="img/Assets2Godot_Polyhaven.jpg" width="844"
+      alt="Assets2Godot Polyhaven tab — provider tabs, filter row and CC0 asset cards in the Godot editor">
+  </p>
+  <p>
+    <img src="img/Assets2Godot_ambientCG.jpg" width="418"
+      alt="Assets2Godot ambientCG tab — CC0 terrain assets in the Godot editor">
+    <img src="img/Assets2Godot_BlenderKit_docked.jpg" width="418"
+      alt="Assets2Godot BlendKit tab in docked panel mode">
   </p>
 </div>
 
