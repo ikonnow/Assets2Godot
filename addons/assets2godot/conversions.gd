@@ -506,3 +506,306 @@ static func _write_material_tres(path: String, sub: String, bound: Dictionary) -
 		f.store_string("\n".join(lines) + "\n")
 		f = null
 
+
+## Post-download alpha pass. StandardMaterial3D has no opacity slot, so
+## a provider's separate opacity map bakes into the albedo's alpha
+## channel (<stem>_alpha.png next to it) and the .tres gets the
+## transparency props: binary masks → scissor cutouts + cull off
+## (Godot's leaves/decal convention, same as material_to_godot.py),
+## graded alpha → blend for glass. ambientCG ships a separate
+## <stem>_Opacity.* map and a Color PNG whose alpha channel is fully
+## opaque (verified on ManholeCover011) — alpha detection therefore
+## reads pixels, never the file's color type. Shipped and generated
+## .tres get patched alike; reruns skip files that already set
+## transparency. Image work runs on the worker pool like convert_dir.
+static func apply_alpha(dir: String) -> void:
+	# glTF BLEND repair is independent of the .tres jobs — model downloads
+	# (gltf + jpgs, no .tres anywhere) would otherwise skip it entirely.
+	_fix_gltf_blend_dir(dir)
+	var jobs := []
+	_collect_alpha_jobs(dir, jobs)
+	if jobs.is_empty():
+		return
+	var tree := Engine.get_main_loop() as SceneTree
+	for job in jobs:
+		var outcome := []
+		var task := WorkerThreadPool.add_task(
+			func(): outcome.append(_alpha_bake(job)))
+		var deadline := Time.get_ticks_msec() + CONVERSION_TIMEOUT_MS
+		while not WorkerThreadPool.is_task_completed(task) \
+				and Time.get_ticks_msec() < deadline:
+			await tree.process_frame
+		var r: Dictionary = outcome[0] if not outcome.is_empty() else {}
+		if r.is_empty():
+			continue
+		_patch_alpha_tres(str(job["tres"]), str(job["albedo_rel"]),
+			str(r.get("baked", "")), str(r.get("mode", "")))
+
+
+## .gltf files in the tree → patch BLEND materials that carry no alpha
+## signal anywhere. alphaMode BLEND was authored deliberately — with no
+## alpha source it's a rendering no-op, i.e. the exporter dropped it
+## (Polyhaven Lantern_01: glass bound to the opaque brass diffuse jpg).
+## .glb binaries are left alone — JSON-patch only.
+static func _fix_gltf_blend_dir(dir: String) -> void:
+	if not DirAccess.dir_exists_absolute(dir):
+		return
+	for sub in DirAccess.get_directories_at(dir):
+		if not sub.begins_with("."):
+			_fix_gltf_blend_dir(dir.path_join(sub))
+	for file in DirAccess.get_files_at(dir):
+		if file.get_extension().to_lower() == "gltf":
+			_fix_gltf_blend(dir.path_join(file))
+
+
+## Uniform alpha for a blend material that lost its alpha source —
+## thin dielectric panes (lantern glass, windows) read correctly; the
+## constant is a documented guess, not provider data.
+const GLTF_BLEND_FALLBACK_ALPHA := 0.3
+
+
+static func _fix_gltf_blend(path: String) -> void:
+	var text := FileAccess.get_file_as_string(path)
+	if text.is_empty() or not "alphaMode" in text:
+		return
+	var data: Variant = JSON.parse_string(text)
+	if not data is Dictionary:
+		return
+	var g: Dictionary = data
+	var textures: Array = g.get("textures", [])
+	var images: Array = g.get("images", [])
+	var dir := path.get_base_dir()
+	var changed := false
+	for m in g.get("materials", []):
+		if not m is Dictionary or str(m.get("alphaMode", "")) != "BLEND":
+			continue
+		var pbr: Dictionary = m.get("pbrMetallicRoughness", {})
+		var bcf: Array = pbr.get("baseColorFactor", [1.0, 1.0, 1.0, 1.0])
+		if bcf.size() >= 4 and float(bcf[3]) < 1.0:
+			continue  # carries real alpha already
+		if m.get("extensions", {}).has("KHR_materials_transmission"):
+			continue  # physically transparent already
+		# The bound base color texture is the only other alpha source —
+		# embedded/bufferView images can't be verified, so they skip
+		# patching rather than double-darken a working alpha.
+		var has_alpha := false
+		var verifiable := true
+		var tex_i: int = int(pbr.get("baseColorTexture", {}).get("index", -1))
+		if tex_i >= 0 and tex_i < textures.size():
+			var img_i: int = int(textures[tex_i].get("source", -1))
+			if img_i >= 0 and img_i < images.size():
+				var uri := str(images[img_i].get("uri", "")).uri_decode()
+				if uri.begins_with("data:"):
+					verifiable = false
+				elif not uri.is_empty() \
+						and not uri.get_extension().to_lower() in ["jpg", "jpeg"]:
+					var img := Image.load_from_file(dir.path_join(uri))
+					has_alpha = img != null \
+						and img.detect_alpha() != Image.ALPHA_NONE
+		if not verifiable or has_alpha:
+			continue
+		bcf.resize(4)
+		bcf[3] = GLTF_BLEND_FALLBACK_ALPHA
+		pbr["baseColorFactor"] = bcf
+		m["pbrMetallicRoughness"] = pbr
+		changed = true
+	if changed:
+		var f := FileAccess.open(path, FileAccess.WRITE)
+		if f != null:
+			f.store_string(JSON.stringify(g, "\t"))
+			f.close()
+
+
+## .tres files in the tree → [{tres, albedo_rel, albedo_abs}] for those
+## that bind an albedo texture and set no transparency yet.
+static func _collect_alpha_jobs(dir: String, jobs: Array) -> void:
+	if not DirAccess.dir_exists_absolute(dir):
+		return
+	for sub in DirAccess.get_directories_at(dir):
+		if not sub.begins_with("."):
+			_collect_alpha_jobs(dir.path_join(sub), jobs)
+	for file in DirAccess.get_files_at(dir):
+		if file.get_extension().to_lower() != "tres":
+			continue
+		var path := dir.path_join(file)
+		var text := FileAccess.get_file_as_string(path)
+		if text.is_empty() or "transparency =" in text:
+			continue
+		var rel := _tres_albedo(text)
+		if rel.is_empty():
+			continue
+		var abs_path := rel
+		if rel.begins_with("res://"):
+			abs_path = ProjectSettings.globalize_path(rel)
+		elif not rel.is_absolute_path():
+			abs_path = dir.path_join(rel.trim_prefix("./"))
+		jobs.append({"tres": path, "albedo_rel": rel, "albedo_abs": abs_path})
+
+
+## ext_resource id → path, then the albedo_texture binding → its path.
+## "" when the material binds no albedo texture.
+static func _tres_albedo(text: String) -> String:
+	var ext_paths := {}
+	var albedo_id := ""
+	for raw in text.split("\n"):
+		var line := raw.strip_edges()
+		if line.begins_with("[ext_resource"):
+			var p := line.find("path=\"")
+			var i := line.find("id=\"")
+			if p >= 0 and i >= 0:
+				var q := line.find("\"", p + 6)
+				var j := line.find("\"", i + 4)
+				if q > p and j > i:
+					ext_paths[line.substr(i + 4, j - i - 4)] = \
+						line.substr(p + 6, q - p - 6)
+		elif line.begins_with("albedo_texture"):
+			var a := line.find("ExtResource(\"")
+			if a >= 0:
+				var b := line.find("\"", a + 13)
+				if b > a:
+					albedo_id = line.substr(a + 13, b - a - 13)
+	return str(ext_paths.get(albedo_id, ""))
+
+
+## Worker: decide the alpha mode and bake the mask in when the albedo
+## has none. {mode, baked} — {} when nothing applies.
+static func _alpha_bake(job: Dictionary) -> Dictionary:
+	var img := Image.load_from_file(str(job["albedo_abs"]))
+	if img == null:
+		return {}
+	var mode := ""
+	match img.detect_alpha():
+		Image.ALPHA_BIT:
+			mode = "scissor"
+		Image.ALPHA_BLEND:
+			# Intermediate alpha exists — a mostly-binary mask is still a
+			# cutout; a soft ramp is glass.
+			mode = "blend" if _alpha_mid_frac(img) >= ALPHA_BLEND_MIN_FRAC \
+				else "scissor"
+	if mode.is_empty():
+		var mask_path := _find_opacity_map(str(job["albedo_abs"]))
+		if mask_path.is_empty():
+			return {}
+		var mask := Image.load_from_file(mask_path)
+		if mask == null:
+			return {}
+		mode = "blend" if _mask_mid_frac(mask) >= ALPHA_BLEND_MIN_FRAC \
+			else "scissor"
+		var baked := str(job["albedo_abs"]).get_basename() + "_alpha.png"
+		_bake_alpha(img, mask)
+		if img.save_png(baked) != OK:
+			return {}
+		return {"mode": mode, "baked": baked}
+	return {"mode": mode, "baked": ""}
+
+
+## Minimum share of half-transparent pixels for alpha blend — below it
+## the mask is a noisy/dirty cutout and scissor is the better mode.
+const ALPHA_BLEND_MIN_FRAC := 0.05
+
+
+## The opacity map beside an albedo file: same stem minus its map token
+## (ManholeCover011_1K-PNG_Color → ManholeCover011_1K-PNG_Opacity,
+## metal_grate_2k_diff → metal_grate_2k_opacity). "" when absent.
+static func _find_opacity_map(albedo_path: String) -> String:
+	var stem := albedo_path.get_file().get_basename()
+	var prefix := stem.substr(0, stem.rfind("_")) if "_" in stem else ""
+	if prefix.is_empty():
+		return ""
+	var dir := albedo_path.get_base_dir()
+	for file in DirAccess.get_files_at(dir):
+		if file.get_basename() == stem:
+			continue
+		var bn := file.get_basename().to_lower()
+		if not bn.begins_with(prefix.to_lower() + "_"):
+			continue
+		var token := bn.substr(prefix.length() + 1)
+		if token.begins_with("opacity") or token.begins_with("mask") \
+				or token.begins_with("alpha"):
+			return dir.path_join(file)
+	return ""
+
+
+## Copy the grayscale mask into the albedo's alpha channel — byte loop
+## over RGBA8/L8 planes, ~16 M iterations at 4K on the worker.
+static func _bake_alpha(img: Image, mask: Image) -> void:
+	var w := img.get_width()
+	var h := img.get_height()
+	if img.get_format() != Image.FORMAT_RGBA8:
+		img.convert(Image.FORMAT_RGBA8)
+	if mask.get_size() != img.get_size():
+		mask.resize(w, h, Image.INTERPOLATE_BILINEAR)
+	if mask.get_format() != Image.FORMAT_L8:
+		mask.convert(Image.FORMAT_L8)
+	var dst := img.get_data()
+	var msk := mask.get_data()
+	for i in w * h:
+		dst[i * 4 + 3] = msk[i]
+	img.set_data(w, h, false, Image.FORMAT_RGBA8, dst)
+
+
+## Half-transparent share of a grayscale mask, sampled on a ≤512 px
+## nearest-neighbor copy (nearest keeps binary masks binary).
+static func _mask_mid_frac(img: Image) -> float:
+	var probe := _alpha_probe(img, Image.FORMAT_L8)
+	var data := probe.get_data()
+	var mid := 0
+	for b in data:
+		if b > 0 and b < 255:
+			mid += 1
+	return float(mid) / maxi(data.size(), 1)
+
+
+## Same for an RGBA image's alpha channel.
+static func _alpha_mid_frac(img: Image) -> float:
+	var probe := _alpha_probe(img, Image.FORMAT_RGBA8)
+	var data := probe.get_data()
+	var mid := 0
+	for i in range(3, data.size(), 4):
+		if data[i] > 0 and data[i] < 255:
+			mid += 1
+	return float(mid) / maxi(data.size() / 4, 1)
+
+
+## A ≤512 px nearest-neighbor copy in [param format] — shared probe for
+## the mid-alpha fractions.
+static func _alpha_probe(img: Image, format: Image.Format) -> Image:
+	var probe: Image = img.duplicate()
+	var w := mini(probe.get_width(), 512)
+	var h := mini(probe.get_height(), 512)
+	if probe.get_width() != w:
+		probe.resize(w, h, Image.INTERPOLATE_NEAREST)
+	if probe.get_format() != format:
+		probe.convert(format)
+	return probe
+
+
+## Write the mode's props into the .tres and rebind the albedo to the
+## baked file. Properties append after [resource] — the last section in
+## both shipped and generated materials.
+static func _patch_alpha_tres(tres_path: String, albedo_rel: String,
+		baked_abs: String, mode: String) -> void:
+	var props := PackedStringArray()
+	match mode:
+		"scissor":
+			props.append_array(["transparency = 2",
+				"alpha_scissor_threshold = 0.5", "cull_mode = 2"])
+		"blend":
+			props.append("transparency = 1")
+		_:
+			return
+	var text := FileAccess.get_file_as_string(tres_path)
+	if text.is_empty() or "transparency =" in text:
+		return
+	if not baked_abs.is_empty():
+		var rel := baked_abs.get_file()
+		if "/" in albedo_rel:
+			rel = albedo_rel.get_base_dir().path_join(rel)
+		text = text.replace('path="%s"' % albedo_rel, 'path="%s"' % rel)
+	if not text.ends_with("\n"):
+		text += "\n"
+	var f := FileAccess.open(tres_path, FileAccess.WRITE)
+	if f:
+		f.store_string(text + "\n".join(props) + "\n")
+		f = null
+

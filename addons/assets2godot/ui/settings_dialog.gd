@@ -4,6 +4,8 @@ extends AcceptDialog
 ## also in Godot's Project Settings and Editor Settings under Blendkit.
 
 const BlenderImport = preload("res://addons/assets2godot/blender_import.gd")
+const AcgApi = preload("res://addons/assets2godot/a2g/ambientcg_api.gd")
+const AcgTerrain = preload("res://addons/assets2godot/a2g/a2g_terrain.gd")
 const BlenderImportDialog = preload("res://addons/assets2godot/ui/blender_import_dialog.gd")
 const ClientConnection = preload("res://addons/assets2godot/client_connection.gd")
 const GalleryApi = preload("res://addons/assets2godot/ui/gallery/gallery_api.gd")
@@ -27,6 +29,20 @@ var _a2g_cap: OptionButton
 var _a2g_files: CheckBox
 var _a2g_panel: OptionButton
 var _a2g_tablogos: CheckBox
+var _player_path: LineEdit
+var _player_dialog: EditorFileDialog
+var _terrain_extent: SpinBox
+var _terrain_relief: SpinBox
+var _terrain_res: OptionButton
+var _tex_format: OptionButton
+var _fmt_rows := {}
+var _res_rows := {}
+# Texture-bearing providers with a jpg/png choice — values in the
+# provider's own casing (Polyhaven lists lowercase resolutions).
+const PROVIDER_DEFAULTS := [
+	{"key": "ambientcg", "title": "ambientCG", "res": ["1K", "2K", "4K", "8K"]},
+	{"key": "polyhaven", "title": "Polyhaven", "res": ["1k", "2k", "4k", "8k"]},
+]
 
 
 ## Called by the menu once the plugin is known.
@@ -110,6 +126,60 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_a2g_tablogos.toggled.connect(plugin.set_tab_logos)
 	_row("Provider logos", _a2g_tablogos, "Marks BlendKit, Polyhaven and ambientCG tabs with their provider logo.\nOff keeps the tabs text-only like the editor's own — the A2G menu's 'Provider logos in tabs' toggles the same setting.")
 
+	_section("Download defaults", "Which option drag & drop, the quick-download tile and the details popup preselect for texture-bearing providers.\nProvider rows override the global default; 'Provider default' inherits it.\nAlso in Editor Settings → Assets2Godot.")
+	_tex_format = _options(["Auto (PNG when the asset has an opacity map)", "JPEG", "PNG"])
+	_tex_format.item_selected.connect(func(i): _set_es("assets2godot/texture_format", ["auto", "jpg", "png"][i]))
+	_row("Texture format", _tex_format, "Default map format for new texture downloads.\nAuto picks PNG when the asset ships an opacity map (alpha needs lossless edges) and JPEG otherwise — JPEG is ~3× smaller.\nPNG keeps mask edges lossless; JPEG still renders transparent through the alpha bake, just with softer/noisier cutout edges.")
+	for p in PROVIDER_DEFAULTS:
+		var fmt := _options(["Provider default", "Auto", "JPEG", "PNG"])
+		# .bind() freezes the provider key — a lambda's capture of the
+		# loop var would alias every row to the last provider.
+		fmt.item_selected.connect(_on_provider_fmt.bind(str(p["key"])))
+		_row("%s texture format" % p["title"], fmt,
+			"Overrides the global Texture format for %s. Provider default inherits it." % p["title"])
+		_fmt_rows[p["key"]] = fmt
+		var res_items: Array = ["Provider default"] + p["res"]
+		var res := _options(res_items)
+		res.item_selected.connect(_on_provider_res.bind(str(p["key"]), Array(p["res"])))
+		_row("%s resolution" % p["title"], res,
+			"Resolution preselected for %s downloads — the provider tab's Resolution dropdown writes the same setting." % p["title"])
+		_res_rows[p["key"]] = res
+
+	_player_path = LineEdit.new()
+	_player_path.text_submitted.connect(func(_t): _apply_player_path())
+	_player_path.focus_exited.connect(_apply_player_path)
+	_player_path.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var player_browse := Button.new()
+	player_browse.icon = get_theme_icon("FolderBrowse", "EditorIcons")
+	player_browse.theme_type_variation = "EditorInspectorButton"
+	player_browse.tooltip_text = "Locate the Substance 3D Player executable."
+	player_browse.pressed.connect(func():
+		_player_dialog.current_path = _player_path.text.strip_edges()
+		_player_dialog.popup_file_dialog())
+	var player_row := HBoxContainer.new()
+	player_row.add_child(_player_path)
+	player_row.add_child(player_browse)
+	_player_dialog = EditorFileDialog.new()
+	_player_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_FILE
+	_player_dialog.access = EditorFileDialog.ACCESS_FILESYSTEM
+	_player_dialog.add_filter("*.exe;Executable")
+	_player_dialog.file_selected.connect(func(p):
+		_player_path.text = p
+		_apply_player_path())
+	add_child(_player_dialog)
+	_row("Substance Player", player_row, "Substance 3D Player location for ambientCG .sbsar assets.\nEmpty = auto-detect Creative Cloud / legacy installs (shown as placeholder).\nThe details popup's 'Open in Substance Player' works through the file association either way.")
+	_player_path.tooltip_text = player_row.tooltip_text
+
+	_terrain_extent = _spin(10, 50000, 10, "m")
+	_terrain_extent.value_changed.connect(func(v): _set_es(AcgTerrain.SETTING_EXTENT, v))
+	_row("Terrain extent", _terrain_extent, "XZ footprint baked into placed ambientCG terrains when no sibling OBJ gives real meters.\nAffects the next placement, not existing meshes.")
+	_terrain_relief = _spin(1, 10000, 1, "m")
+	_terrain_relief.value_changed.connect(func(v): _set_es(AcgTerrain.SETTING_RELIEF, v))
+	_row("Terrain relief", _terrain_relief, "Peak-to-valley height baked into placed terrains (the heightmap is normalized 0–1).")
+	_terrain_res = _options(["129", "257", "513", "1025"])
+	_terrain_res.item_selected.connect(func(i): _set_es(AcgTerrain.SETTING_RES, int(_terrain_res.get_item_text(i))))
+	_row("Terrain grid", _terrain_res, "Vertex grid the heightmap decimates to for placed terrains — 257 keeps ~66k verts, higher costs memory for detail the heightmap may not have.")
+
 	# A sibling, as a child window would hide with Settings.
 	_blender_import_dialog = BlenderImportDialog.new()
 	get_parent().add_child(_blender_import_dialog)
@@ -136,10 +206,31 @@ func _load() -> void:
 	_a2g_files.button_pressed = bool(_es("assets2godot/show_all_files", false))
 	_a2g_panel.select(clampi(plugin.panel_mode(), 0, 1))
 	_a2g_tablogos.button_pressed = plugin.tab_logos_enabled()
+	_load_player_path()
+	_terrain_extent.set_value_no_signal(float(_es(AcgTerrain.SETTING_EXTENT, AcgTerrain.DEFAULT_EXTENT_M)))
+	_terrain_relief.set_value_no_signal(float(_es(AcgTerrain.SETTING_RELIEF, AcgTerrain.DEFAULT_RELIEF_M)))
+	_terrain_res.select(maxi(0, [129, 257, 513, 1025].find(int(_es(AcgTerrain.SETTING_RES, AcgTerrain.GRID_RES)))))
+	_tex_format.select(maxi(0, ["auto", "jpg", "png"].find(str(_es("assets2godot/texture_format", "auto")))))
+	for p in PROVIDER_DEFAULTS:
+		var key := str(p["key"])
+		_fmt_rows[key].select(maxi(0, ["default", "auto", "jpg", "png"].find(
+			str(_es("assets2godot/providers/%s_texture_format" % key, "default")))))
+		_res_rows[key].select(maxi(0, ([""] + Array(p["res"])).find(
+			str(_es("assets2godot/providers/%s_resolution" % key, "")))))
 
 
 ## Reads/writes the assets2godot/* editor settings — these rows have no
 ## plugin-level side effects, so they talk to EditorSettings directly.
+func _on_provider_fmt(i: int, key: String) -> void:
+	_set_es("assets2godot/providers/%s_texture_format" % key,
+		["default", "auto", "jpg", "png"][i])
+
+
+func _on_provider_res(i: int, key: String, res_items: Array) -> void:
+	_set_es("assets2godot/providers/%s_resolution" % key,
+		"" if i == 0 else str(res_items[i - 1]))
+
+
 func _es(key: String, fallback: Variant) -> Variant:
 	var es := EditorInterface.get_editor_settings()
 	if es and es.has_setting(key):
@@ -186,6 +277,39 @@ func _on_download_dir_selected(dir: String) -> void:
 
 func _apply_download_dir() -> void:
 	plugin.set_download_dir(_download_dir.text.strip_edges())
+
+
+## Substance Player row: placeholder shows what auto-detect found; a set
+## path that doesn't exist earns the warning color like Blender Import.
+func _load_player_path() -> void:
+	_player_path.text = str(_es("assets2godot/substance_player_path", ""))
+	var detected := AcgApi.substance_player_path()
+	_player_path.placeholder_text = detected if detected != "" else "Not found — browse or get it from Adobe"
+	_mark_player_path()
+
+
+func _apply_player_path() -> void:
+	_set_es("assets2godot/substance_player_path", _player_path.text.strip_edges())
+	_mark_player_path()
+
+
+func _mark_player_path() -> void:
+	var custom := _player_path.text.strip_edges()
+	var bad := not custom.is_empty() and not FileAccess.file_exists(custom)
+	var warn := get_theme_color("warning_color", "Editor")
+	if bad:
+		_player_path.add_theme_color_override("font_color", warn)
+	else:
+		_player_path.remove_theme_color_override("font_color")
+
+
+func _spin(min_v: float, max_v: float, step: float, suffix: String) -> SpinBox:
+	var spin := SpinBox.new()
+	spin.min_value = min_v
+	spin.max_value = max_v
+	spin.step = step
+	spin.suffix = suffix
+	return spin
 
 
 func _section(text: String, tooltip: String) -> void:

@@ -350,7 +350,7 @@ static func option_label(entry: Dictionary) -> String:
 ## the site means by "download a terrain" — heightmap EXR primary with
 ## its same-res JPG maps zip riding as an includes companion — and
 ## reorders it to the front, since the EXR is the asset's core payload.
-static func flatten_files(raw: Variant, asset_type := "") -> Array:
+static func flatten_files(raw: Variant, asset_type := "", map_fmt := "jpg") -> Array:
 	var out := []
 	for e: Variant in parse_downloads(raw):
 		if not e is Dictionary or not e.has("url"):
@@ -379,7 +379,7 @@ static func flatten_files(raw: Variant, asset_type := "") -> Array:
 	for o in out:
 		o.erase("_rank")
 	if asset_type == "terrain":
-		out = _bundle_terrain(out)
+		out = _bundle_terrain(out, map_fmt)
 	return out
 
 
@@ -387,14 +387,17 @@ static func flatten_files(raw: Variant, asset_type := "") -> Array:
 ## EXR's resolution rides along as an includes companion (nearest res
 ## when the exact one is missing); total_size and label reflect the
 ## real fetch. EXR bundles move to the front so res_hint picks them.
-static func _bundle_terrain(options: Array) -> Array:
+static func _bundle_terrain(options: Array, map_fmt := "jpg") -> Array:
 	var jpg_by_res := {}
 	var jpg_all := []
 	for e in options:
-		if str(e.get("ext", "")) == "zip" and _fmt_of(e) == "jpg":
+		if str(e.get("ext", "")) == "zip" and _fmt_of(e) == map_fmt:
 			var res := str((e.get("parsed", {}) as Dictionary).get("res", ""))
 			jpg_by_res[res] = e
 			jpg_all.append(e)
+	if jpg_all.is_empty() and map_fmt != "jpg":
+		# No map zip in the requested format — jpg rides along instead.
+		return _bundle_terrain(options, "jpg")
 	var bundles := []
 	for e in options:
 		if str(e.get("ext", "")) != "exr":
@@ -427,17 +430,25 @@ static func _bundle_terrain(options: Array) -> Array:
 
 ## Index of the suggested option: the top-ranked format nearest
 ## [param res_hint], else the first option. -1 on an empty list.
-static func pick_default(options: Array, res_hint := "2K") -> int:
+## [param fmt_hint] (jpg/png) retargets the format block only when the
+## top option is itself a jpg/png map zip — terrain EXR bundles, sbsar
+## and obj blocks keep their own order.
+static func pick_default(options: Array, res_hint := "2K", fmt_hint := "") -> int:
 	if options.is_empty():
 		return -1
 	# Options arrive pre-sorted — the first entry's format block is the
 	# preferred one; pick its row nearest the hint (like PH's 2k gltf).
 	var top_fmt := _fmt_of(options[0])
+	if fmt_hint in ["jpg", "png"] and str(options[0].get("ext", "")) == "zip" \
+			and top_fmt in ["jpg", "png"]:
+		top_fmt = fmt_hint
 	var best := -1
 	var best_d := 1 << 30
 	for i in options.size():
 		if _fmt_of(options[i]) != top_fmt:
-			break # past the preferred format's block
+			# Other format blocks — a hinted block may sort later, so
+			# scan past rather than break.
+			continue
 		var res := str((options[i].get("parsed", {}) as Dictionary).get("res", ""))
 		var d := 50 if res.is_empty() else absi(_res_rank(res) - _res_rank(res_hint))
 		if d < best_d:
@@ -452,6 +463,29 @@ static func _fmt_of(entry: Dictionary) -> String:
 	if str(entry.get("ext", "")) == "zip":
 		return str((entry.get("parsed", {}) as Dictionary).get("fmt", ""))
 	return str(entry.get("ext", ""))
+
+
+## Whether the catalog lists an opacity/alpha map for the asset — the
+## alpha signal for the texture-format default. Verified: decal
+## ManholeCover011 lists "opacity", Leaking012A does not.
+static func asset_has_alpha(asset: Dictionary) -> bool:
+	for m in asset.get("maps", []):
+		var s := str(m).to_lower()
+		if s.begins_with("opacity") or s in ["alpha", "mask", "transparency"]:
+			return true
+	return false
+
+
+## The map-zip format the user's texture-format pref resolves to for an
+## asset: jpg/png verbatim, auto → png when the asset has alpha else ""
+## (keeps the jpg-first ordering). Empty means "don't retarget".
+static func tex_fmt_for(pref: String, has_alpha: bool) -> String:
+	match pref:
+		"jpg", "jpeg":
+			return "jpg"
+		"png":
+			return "png"
+	return "png" if has_alpha else ""
 
 
 ## Display name for a type slug: TYPE_LABELS first, else capitalize.
@@ -474,6 +508,54 @@ static func technique_label(slug: String) -> String:
 ## A map slug → display name ("ambient-occlusion" → "Ambient Occlusion").
 static func map_label(slug: String) -> String:
 	return technique_label(slug)
+
+
+## Substance 3D Player — the free .sbsar renderer. There's no Godot
+## path for the format, so the integration is detect → deep-link →
+## fallback-link: find the install, open the file through the OS
+## association, else point at the official page (Adobe distributes via
+## Creative Cloud — no stable direct binary to bundle).
+const PLAYER_URL := "https://www.adobe.com/products/substance3d-player.html"
+
+
+## The catalog carries no author field — ambientCG is Lennart Demes'
+## one-person project (that's why the details popup's support note
+## reads the way it does), so every asset attributes to him.
+const AUTHOR := "Lennart Demes"
+
+
+## The Player binary — a configured `assets2godot/substance_player_path`
+## wins, then the standard Creative Cloud / legacy install dirs.
+## "" = not found.
+static func substance_player_path() -> String:
+	var configured := str(EditorInterface.get_editor_settings().get(
+		"assets2godot/substance_player_path") or "")
+	if configured != "" and FileAccess.file_exists(configured):
+		return configured
+	match OS.get_name():
+		"Windows":
+			for base in ["C:/Program Files/Adobe", "C:/Program Files (x86)/Adobe",
+					"C:/Program Files/Allegorithmic"]:
+				var d := DirAccess.open(base)
+				if d == null:
+					continue
+				for sub in d.get_directories():
+					if sub.contains("Substance") and sub.contains("Player"):
+						for f in DirAccess.get_files_at(base + "/" + sub):
+							if f.get_extension().to_lower() == "exe":
+								return base + "/" + sub + "/" + f
+		"macOS":
+			if DirAccess.dir_exists_absolute("/Applications/Substance 3D Player.app"):
+				return "/Applications/Substance 3D Player.app"
+	return ""
+
+
+## The first .sbsar inside a downloaded asset dir, "" when absent.
+static func find_sbsar(dir: String) -> String:
+	for f in DirAccess.get_files_at(dir):
+		if f.get_extension().to_lower() == "sbsar":
+			return dir.path_join(f)
+	return ""
 
 
 ## Physical size for the popup — the API's centimeters → the site's

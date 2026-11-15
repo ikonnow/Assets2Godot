@@ -32,6 +32,8 @@ const SETTING_THUMB := "assets2godot/thumb_size"
 const SETTING_CAP := "assets2godot/scene_resource_cap"
 const SETTING_FILES := "assets2godot/show_all_files"
 const SETTING_TAB_LOGOS := "assets2godot/tab_logos"
+const SETTING_TEX_FORMAT := "assets2godot/texture_format"
+const TEX_FORMATS := ["auto", "jpg", "png"]
 
 var plugin: EditorPlugin
 
@@ -39,6 +41,7 @@ var _menu: PopupMenu
 var _view_menu: PopupMenu
 var _thumb_menu: PopupMenu
 var _cap_menu: PopupMenu
+var _fmt_menu: PopupMenu
 var _settings: AcceptDialog
 ## GitHub release state: {} unchecked, {"latest": tag, "url": page} or
 ## {"error": why} after a check.
@@ -69,6 +72,10 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_cap_menu.name = "CapMenu"
 	_cap_menu.id_pressed.connect(func(id): _set_es(SETTING_CAP, SCENE_CAPS[id]))
 	_menu.add_child(_cap_menu)
+	_fmt_menu = PopupMenu.new()
+	_fmt_menu.name = "FmtMenu"
+	_fmt_menu.id_pressed.connect(func(id): _set_es(SETTING_TEX_FORMAT, TEX_FORMATS[id]))
+	_menu.add_child(_fmt_menu)
 	# The same Settings dialog the BlendKit menu opens — one settings
 	# surface for the whole plugin, retitled for this menu's scope.
 	_settings = SettingsDialog.new()
@@ -113,6 +120,7 @@ func _fill_menu() -> void:
 	_view_menu.clear()
 	_thumb_menu.clear()
 	_cap_menu.clear()
+	_fmt_menu.clear()
 	# Provider tab switches — the registry's keys and logos, checked
 	# state from the same editor settings the plugin answers.
 	for i in plugin.PROVIDERS.size():
@@ -147,14 +155,21 @@ func _fill_menu() -> void:
 		_cap_menu.set_item_checked(i, _es(SETTING_CAP, 300) == SCENE_CAPS[i])
 	_menu.add_submenu_item("Scene resources cap", _cap_menu.name)
 	_menu.set_item_tooltip(-1, "Max resources collected from the open scene for the Assets view.")
+	for i in TEX_FORMATS.size():
+		var label: String = "Auto" if TEX_FORMATS[i] == "auto" else TEX_FORMATS[i].to_upper()
+		_fmt_menu.add_radio_check_item(label, i)
+		_fmt_menu.set_item_checked(i, _es(SETTING_TEX_FORMAT, "auto") == TEX_FORMATS[i])
+	_menu.add_submenu_item("Texture format", _fmt_menu.name)
+	_menu.set_item_tooltip(-1, "Default map format for texture downloads — Auto picks PNG when the asset has an opacity map. Per-provider overrides live in Settings.")
 	# Icon check row like the provider switches above — a plain check
 	# item renders its box offset from the icon_check rows' boxes.
 	_menu.add_icon_check_item(get_theme_icon("FileList", "EditorIcons"), "Show all files", Item.SHOW_FILES)
 	_menu.set_item_checked(-1, bool(_es(SETTING_FILES, false)))
 	_menu.set_item_tooltip(-1, "List text files, configs and scripts in the Assets view too.")
 	# The header's dock toggle as a menu check — same setting, same
-	# immediate reparent.
-	_menu.add_icon_check_item(get_theme_icon("GuiTabUnfloat", "EditorIcons"),
+	# immediate reparent; EditorDock is the icon the header button uses
+	# (GuiTabUnfloat doesn't exist in the editor's icon set).
+	_menu.add_icon_check_item(get_theme_icon("EditorDock", "EditorIcons"),
 		"Docked panel", Item.PANEL_DOCKED)
 	_menu.set_item_checked(-1, plugin.panel_mode() == plugin.PanelMode.DOCKED)
 	_menu.set_item_tooltip(-1, "Move the A2G panel into a native editor dock — position, floating and close then come from the dock's ⋮ menu.")

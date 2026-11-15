@@ -119,11 +119,16 @@ func _style_status() -> void:
 	_status.add_theme_constant_override("shadow_offset_y", 1)
 	_status.add_theme_font_size_override("font_size", 10)
 	var tracked := FontVariation.new()
-	if has_theme_font("main_bold", "EditorFonts"):
-		tracked.base_font = get_theme_font("main_bold", "EditorFonts")
-	else:
-		# 4.7 has no "main_bold" entry — embolden the regular editor font.
-		tracked.base_font = get_theme_font("main", "EditorFonts")
+	# Editor font names shifted in 4.8 (MSDF variants); has_theme_font
+	# resolves them inconsistently with get_theme_font, so walk the
+	# candidates newest-first and take the first that actually resolves.
+	for fname in [&"main_bold_msdf", &"main_bold", &"main"]:
+		if not has_theme_font(fname, "EditorFonts"):
+			continue
+		var f := get_theme_font(fname, "EditorFonts")
+		if f != null:
+			tracked.base_font = f
+			break
 	tracked.variation_embolden = 0.8
 	tracked.spacing_glyph = 2
 	tracked.spacing_space = 4
@@ -183,6 +188,12 @@ func _can_drop_data(at: Vector2, data: Variant) -> bool:
 	if mode == Mode.FILESYSTEM:
 		return kind.begins_with("remote")
 	if EditorInterface.get_edited_scene_root() == null:
+		# No scene yet — the drop itself creates a Node3D root (same
+		# result as the editor's own scene-file drop), so placeable
+		# kinds still accept. No ghost though: it needs a root to hang
+		# from, and assign kinds need a live mesh to hit.
+		if kind in ["remote", "remote_terrain", "remote_hdri", "local_hdri"]:
+			return true
 		_clear_ghost()
 		return false
 	var hit := _pick_hit(at)
@@ -190,6 +201,10 @@ func _can_drop_data(at: Vector2, data: Variant) -> bool:
 		_clear_ghost()
 		return false
 	match kind:
+		"remote_file":
+			# Download-only payload — no scene placement, no ghost.
+			_clear_ghost()
+			return false
 		"remote", "remote_hdri", "local_hdri":
 			_show_ghost(_payload_aabb(data), hit.get("point"), kind)
 		"remote_terrain":
@@ -212,6 +227,9 @@ func _drop_data(at: Vector2, data: Variant) -> void:
 	var hit := _pick_hit(at)
 	match kind:
 		"remote", "remote_assign", "remote_hdri", "remote_terrain":
+			if not _ensure_scene_root():
+				_show_status("couldn't create a scene")
+				return
 			var point: Vector3 = hit.get("point", _ghost_bottom())
 			_start_remote(data, kind, point, _assign_target(hit.get("node")))
 		"local_assign":
@@ -221,7 +239,8 @@ func _drop_data(at: Vector2, data: Variant) -> void:
 				_commit_assign(mat, mi)
 			_clear_ghost()
 		"local_hdri":
-			_commit_hdri(str(data["files"][0]))
+			if _ensure_scene_root():
+				_commit_hdri(str(data["files"][0]))
 			_clear_ghost()
 
 
@@ -243,6 +262,12 @@ func _drop_kind(data: Variant) -> String:
 		# stack of images, so it places a textured plane, not a model.
 		if kind in ["terrain", "decal", "atlas", "plain-image", "brush"]:
 			return "remote_terrain"
+		# File-only payloads: .sbsar has no Godot importer or runtime —
+		# the FileSystem-dock drop still downloads it (external pipeline
+		# use), a scene drop refuses instead of downloading then
+		# aborting on "no usable asset".
+		if kind == "substance":
+			return "remote_file"
 		return "remote"
 	if str(d.get("type", "")) == "files" and d.get("files") is Array \
 			and not d["files"].is_empty():
@@ -392,6 +417,26 @@ func _mesh_in_subtree(root: Node) -> MeshInstance3D:
 
 func _mesh_world_aabb(mi: MeshInstance3D) -> AABB:
 	return mi.global_transform * mi.get_aabb()
+
+
+## Empty editor → a bare Node3D root so the drop has somewhere to
+## land, like the editor's own scene-file drop creating a scene.
+## add_root_node covers both "no scene tabs" and "open but empty".
+func _ensure_scene_root() -> bool:
+	if EditorInterface.get_edited_scene_root() != null:
+		return true
+	# EditorInterface.add_root_node exists only on 4.5+ — call() keeps
+	# the file parse-clean on 4.4, where the drop just reports no
+	# landing spot instead of creating the bare root.
+	if not EditorInterface.has_method(&"add_root_node"):
+		return false
+	var root := Node3D.new()
+	root.name = "Node3D"
+	EditorInterface.call(&"add_root_node", root)
+	if EditorInterface.get_edited_scene_root() != null:
+		return true
+	root.free()
+	return false
 
 
 # MARK: ghost — self-drawn INTERNAL children of the scene root
@@ -791,11 +836,16 @@ func _assemble_material(dir: String) -> StandardMaterial3D:
 			elif not f.ends_with(".import"):
 				var m := Conversions._map_parts(f, dir.get_file())
 				var token := str(m.get("token", "")).to_lower()
-				for slot in Conversions.MAP_BINDINGS:
-					if token in Conversions.MAP_BINDINGS[slot] \
-							and not bound.has(slot):
-						bound[slot] = p
-						break
+				if token.begins_with("opacity") or token.begins_with("mask") \
+						or token.begins_with("alpha"):
+					if not bound.has("_opacity"):
+						bound["_opacity"] = p
+				else:
+					for slot in Conversions.MAP_BINDINGS:
+						if token in Conversions.MAP_BINDINGS[slot] \
+								and not bound.has(slot):
+							bound[slot] = p
+							break
 			f = da.get_next()
 		da.list_dir_end()
 	if bound.is_empty():
@@ -821,7 +871,46 @@ func _assemble_material(dir: String) -> StandardMaterial3D:
 	if bound.has("detail"):
 		mat.detail_enabled = true
 		mat.detail_albedo = _load_tex(bound["detail"])
+	_apply_alpha(mat, bound)
 	return mat
+
+
+## Sets that never went through apply_alpha (a bare map folder dropped
+## before/without materialize) still deserve transparency: the albedo's
+## own alpha wins, else the set's opacity map bakes in — in-memory, the
+## fallback writes no files. Same mode rule as Conversions.apply_alpha.
+func _apply_alpha(mat: StandardMaterial3D, bound: Dictionary) -> void:
+	var img: Image = null
+	if bound.has("albedo"):
+		var p := str(bound["albedo"])
+		img = Image.load_from_file(p if not p.begins_with("res://") \
+			else ProjectSettings.globalize_path(p))
+	var mask: Image = null
+	if bound.has("_opacity"):
+		var p := str(bound["_opacity"])
+		mask = Image.load_from_file(p if not p.begins_with("res://") \
+			else ProjectSettings.globalize_path(p))
+	if img != null and img.detect_alpha() == Image.ALPHA_NONE and mask != null:
+		Conversions._bake_alpha(img, mask)
+		mat.albedo_texture = ImageTexture.create_from_image(img)
+		_scissor_or_blend(mat, Conversions._mask_mid_frac(mask))
+	elif img != null:
+		match img.detect_alpha():
+			Image.ALPHA_BIT:
+				_scissor_or_blend(mat, 0.0)
+			Image.ALPHA_BLEND:
+				_scissor_or_blend(mat, Conversions._alpha_mid_frac(img))
+
+
+## The Conversions.apply_alpha mode rule on the live material: mostly
+## binary → scissor cutout (two-sided), graded → blend for glass.
+func _scissor_or_blend(mat: StandardMaterial3D, mid_frac: float) -> void:
+	if mid_frac < Conversions.ALPHA_BLEND_MIN_FRAC:
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+		mat.alpha_scissor_threshold = 0.5
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	else:
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 
 
 ## Textures bind res://-imported when the scan already ran, raw

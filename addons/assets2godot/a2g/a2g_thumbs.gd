@@ -148,15 +148,27 @@ func _sync_size() -> void:
 	_cache.clear()
 
 
+## Any load() path on a res:// file routes through the resource loader
+## and logs "will not work on export" for EVERY decode — a full-grid
+## refill floods + redraws the console. Buffer decode sidesteps it.
 func _decode_image(path: String) -> Image:
+	var ext := path.get_extension().to_lower()
+	var bytes := FileAccess.get_file_as_bytes(path)
+	if bytes.is_empty():
+		return null
 	var img := Image.new()
 	var err := OK
-	if path.get_extension().to_lower() == "svg":
-		# SVGs rasterize tiny by default — bump the scale so they survive
-		# at card size.
-		err = img.load_svg_from_buffer(FileAccess.get_file_as_bytes(path), 4.0)
-	else:
-		err = img.load(path)
+	match ext:
+		"png": err = img.load_png_from_buffer(bytes)
+		"jpg", "jpeg": err = img.load_jpg_from_buffer(bytes)
+		"webp": err = img.load_webp_from_buffer(bytes)
+		"tga": err = img.load_tga_from_buffer(bytes)
+		"bmp": err = img.load_bmp_from_buffer(bytes)
+		"exr": err = img.load_exr_from_buffer(bytes)
+		# SVGs rasterize tiny by default — bump the scale so they
+		# survive at card size.
+		"svg": err = img.load_svg_from_buffer(bytes, 4.0)
+		_: return null
 	return img if err == OK else null
 
 

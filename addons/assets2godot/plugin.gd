@@ -29,6 +29,13 @@ const SETTING_A2G_SCENE_CAP = "assets2godot/scene_resource_cap"
 const SETTING_A2G_SHOW_FILES = "assets2godot/show_all_files"
 # Per-provider tab visibility — "assets2godot/providers/<key>_enabled".
 const SETTING_A2G_PROVIDER = "assets2godot/providers/%s_enabled"
+const SETTING_A2G_TEX_FORMAT = "assets2godot/texture_format"
+const SETTING_A2G_PROVIDER_FMT = "assets2godot/providers/%s_texture_format"
+const SETTING_A2G_PROVIDER_RES = "assets2godot/providers/%s_resolution"
+const TEXTURE_FORMATS := ["auto", "jpg", "png"]
+# Providers whose downloads offer jpg/png texture alternatives (BlendKit
+# packs textures inside .blend/.zip — no choice to default).
+const TEXTURE_FORMAT_PROVIDERS := ["ambientcg", "polyhaven"]
 # Opt-in provider logos inside the tabs — off keeps them text-only.
 const SETTING_A2G_TAB_LOGOS = "assets2godot/tab_logos"
 # Where the A2G panel lives: embedded in its main screen, or a native
@@ -541,6 +548,33 @@ func provider_enabled(key: String) -> bool:
 	return true
 
 
+## The texture format provider [param key] downloads: its own override,
+## else the global setting, else auto. Returns auto/jpg/png.
+func texture_format_for(key: String) -> String:
+	var es := EditorInterface.get_editor_settings()
+	var fmt := str(es.get_setting(SETTING_A2G_PROVIDER_FMT % key)) if es and es.has_setting(SETTING_A2G_PROVIDER_FMT % key) else "default"
+	if fmt == "default":
+		fmt = str(es.get_setting(SETTING_A2G_TEX_FORMAT)) if es and es.has_setting(SETTING_A2G_TEX_FORMAT) else "auto"
+	return fmt if fmt in TEXTURE_FORMATS else "auto"
+
+
+## The persisted resolution hint for provider [param key], in the
+## provider's own casing, else [param fallback].
+func provider_resolution(key: String, fallback := "") -> String:
+	var es := EditorInterface.get_editor_settings()
+	if es and es.has_setting(SETTING_A2G_PROVIDER_RES % key):
+		var res := str(es.get_setting(SETTING_A2G_PROVIDER_RES % key))
+		if not res.is_empty():
+			return res
+	return fallback
+
+
+func set_provider_resolution(key: String, res: String) -> void:
+	var es := EditorInterface.get_editor_settings()
+	if es:
+		es.set_setting(SETTING_A2G_PROVIDER_RES % key, res)
+
+
 ## The pane registered under provider [param key], or null — the Sources
 ## tree's remote rows and the A2G downloads surface find their provider
 ## this way.
@@ -887,8 +921,19 @@ func init_settings() -> void:
 	# under res://Assets2Godot/<key>; the keys live in the tab classes.
 	add_editor_setting(A2GPolyhaven.SETTING_DIR, "")
 	add_editor_setting(A2GAmbientcg.SETTING_DIR, "")
+	# Non-standard Substance 3D Player location — "" = auto-detect the
+	# Creative Cloud / legacy install dirs (AcgApi.substance_player_path).
+	add_editor_setting("assets2godot/substance_player_path", "")
 	for p in PROVIDERS:
 		add_editor_setting(SETTING_A2G_PROVIDER % str(p.get("key", "")), true)
+	# Download defaults: a global texture format plus per-provider
+	# overrides ("default" = inherit, "" resolution = the provider's own).
+	add_editor_setting(SETTING_A2G_TEX_FORMAT, "auto", PROPERTY_HINT_ENUM,
+		",".join(TEXTURE_FORMATS))
+	for key in TEXTURE_FORMAT_PROVIDERS:
+		add_editor_setting(SETTING_A2G_PROVIDER_FMT % key, "default",
+			PROPERTY_HINT_ENUM, "default," + ",".join(TEXTURE_FORMATS))
+		add_editor_setting(SETTING_A2G_PROVIDER_RES % key, "")
 	# After registering, so migrated defaults aren't written to project.godot.
 	for old in OLD_SETTINGS:
 		if ProjectSettings.has_setting(old):

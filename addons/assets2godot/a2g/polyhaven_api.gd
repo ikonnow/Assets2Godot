@@ -51,9 +51,10 @@ static func categories_url(type_slug: String) -> String:
 
 
 ## The big render the site shows on the asset page — asset_img/primary,
-## vs the grid's asset_img/thumbs. height=780 is the site's own size.
-static func preview_url(slug: String) -> String:
-	return "https://cdn.polyhaven.com/asset_img/primary/%s.png?height=780" % slug.uri_encode()
+## vs the grid's asset_img/thumbs. height=780 is the site's own size; the
+## CDN clamps to the source, so a bigger ask just returns the best it has.
+static func preview_url(slug: String, height := 780) -> String:
+	return "https://cdn.polyhaven.com/asset_img/primary/%s.png?height=%d" % [slug.uri_encode(), height]
 
 
 ## "Greg Zaal, Jarod Guest (Sky edits)" from the {author: role} map —
@@ -306,13 +307,21 @@ static func flatten_files(tree: Variant) -> Array:
 ## [param fmt_hint] pins the format block (a model wants its gltf, not
 ## the map-set entry that sorts first for every asset) — when the
 ## block doesn't exist the hint is ignored.
-static func pick_default(options: Array, res_hint := "2k", fmt_hint := "") -> int:
+static func pick_default(options: Array, res_hint := "2k", fmt_hint := "", ext_hint := "") -> int:
 	if options.is_empty():
 		return -1
 	var fmt := fmt_hint
 	if fmt == "" or options.all(func(o):
 			return str(o.get("key", "")).split("/")[0] != fmt):
 		fmt = str(options[0].get("key", "")).split("/")[0]
+	var best := _pick_res(options, fmt, res_hint.to_lower(), ext_hint)
+	if best < 0 and ext_hint != "":
+		# The wanted ext isn't in this set — keep the format block.
+		best = _pick_res(options, fmt, res_hint.to_lower(), "")
+	return best if best >= 0 else 0
+
+
+static func _pick_res(options: Array, fmt: String, res_hint: String, ext_hint: String) -> int:
 	var hint_rank := RES_ORDER.find(res_hint)
 	var best := -1
 	var best_d := 1 << 30
@@ -320,13 +329,43 @@ static func pick_default(options: Array, res_hint := "2k", fmt_hint := "") -> in
 		var parts := str(options[i].get("key", "")).split("/")
 		if parts.size() < 2 or parts[0] != fmt:
 			continue # other format block — hinted blocks sort later
+		if ext_hint != "" and fmt == "set" and parts.size() >= 3:
+			# jpg hints accept jpeg entries; png/webp/exr match exactly.
+			var ext := parts[2].to_lower()
+			var ok := ext in ["jpg", "jpeg"] if ext_hint == "jpg" else ext == ext_hint
+			if not ok:
+				continue
 		var d := 50
 		if RES_ORDER.has(parts[1]) and hint_rank >= 0:
 			d = absi(RES_ORDER.find(parts[1]) - hint_rank)
 		if d < best_d:
 			best_d = d
 			best = i
-	return best if best >= 0 else 0
+	return best
+
+
+## Whether the /files tree carries an opacity/alpha map — Polyhaven
+## texture sets never ship one (verified against the catalog), but the
+## check stays so auto can react if the API grows them.
+static func tree_has_alpha(tree: Variant) -> bool:
+	if not tree is Dictionary:
+		return false
+	for key in tree:
+		if str(key).to_lower() in ["opacity", "mask", "alpha"]:
+			return true
+	return false
+
+
+## The set extension the user's texture-format pref resolves to for an
+## asset: jpg/png verbatim, auto → png when the asset has alpha else ""
+## (keeps the jpg-first ordering). Only meaningful for texture assets.
+static func tex_ext_for(pref: String, has_alpha: bool) -> String:
+	match pref:
+		"jpg", "jpeg":
+			return "jpg"
+		"png":
+			return "png"
+	return "png" if has_alpha else ""
 
 
 ## The format block a default pick should land on for [param type]:

@@ -83,6 +83,7 @@ var _thumb_active := 0
 var _cats: Array = []
 var _cats_fetched := false
 var _res_hint := "2K"
+var _res_btn: OptionButton
 var _local_roots := []
 var _roots_fetched := false
 var _dl_asset: Dictionary = {}
@@ -164,6 +165,12 @@ func _ready() -> void:
 		AcgApi.SORT_OPTIONS, func(_i):
 		AcgApi.sort_assets(_assets, str(_sort_btn.get_selected_metadata()))
 		_rebuild())
+	# Default = Random — fresh assets on every open instead of the same
+	# popular front row; the dropdown still offers the real sorts.
+	for i in _sort_btn.item_count:
+		if str(_sort_btn.get_item_metadata(i)) == "random":
+			_sort_btn.select(i)
+			break
 	_type = _foption(fbar, "Type:", "Filter by asset type — fetches the type's catalog.",
 		AcgApi.TYPE_OPTIONS, func(_i): _reload())
 	_cat_btn = _foption(fbar, "Category:",
@@ -173,11 +180,20 @@ func _ready() -> void:
 	# item's width — category names run long ("Corrugated Steel (15)").
 	_cat_btn.clip_text = true
 	_cat_btn.fit_to_longest_item = false
-	var res_btn := _foption(fbar, "Resolution:",
+	_res_hint = plugin.provider_resolution(PROVIDER_KEY, "2K") if plugin else "2K"
+	_res_btn = _foption(fbar, "Resolution:",
 		"Preferred resolution, preselected in the download dialog.",
 		[["1K", "1K"], ["2K", "2K"], ["4K", "4K"], ["8K", "8K"]], Callable())
-	res_btn.item_selected.connect(func(i): _res_hint = str(res_btn.get_item_metadata(i)))
-	res_btn.selected = 1
+	_res_btn.item_selected.connect(func(i):
+		_res_hint = str(_res_btn.get_item_metadata(i))
+		if plugin:
+			plugin.set_provider_resolution(PROVIDER_KEY, _res_hint))
+	_select_res(_res_hint)
+	# Settings-dialog changes (provider resolution rows) sync the hint
+	# and the dropdown back while the tab stays open.
+	var _es := EditorInterface.get_editor_settings()
+	if _es and not _es.settings_changed.is_connected(_sync_res):
+		_es.settings_changed.connect(_sync_res)
 	# Status lives at the filter row's end — BlendKit keeps the SearchRow
 	# text-free, its own messages sit inside the scroll body.
 	_status = Label.new()
@@ -237,6 +253,37 @@ func _ready() -> void:
 		plugin.connection.connected.connect(_fetch_roots)
 	_fetch_categories()
 	_reload()
+
+
+## The dropdown row matching [param res], else the 2K default.
+func _select_res(res: String) -> void:
+	for i in _res_btn.item_count:
+		if str(_res_btn.get_item_metadata(i)).to_lower() == res.to_lower():
+			_res_btn.select(i)
+			return
+	_res_btn.select(1)
+
+
+## Re-reads the persisted hint — settings_changed fires on every
+## EditorSettings write, so only touch the dropdown on a real change.
+func _sync_res() -> void:
+	var res: String = plugin.provider_resolution(PROVIDER_KEY, "2K") if plugin else "2K"
+	if res == _res_hint or _res_btn == null:
+		return
+	_res_hint = res
+	_select_res(res)
+
+
+## The provider's texture-format pref (auto/jpg/png) — "auto" while no
+## plugin answers (tests, early init).
+func _tex_pref() -> String:
+	return plugin.texture_format_for(PROVIDER_KEY) if plugin else "auto"
+
+
+## The resolved jpg/png hint for [param asset] — "" keeps the jpg-first
+## ordering (auto + opaque).
+func _fmt_hint_for(asset: Dictionary) -> String:
+	return AcgApi.tex_fmt_for(_tex_pref(), AcgApi.asset_has_alpha(asset))
 
 
 func _notification(what: int) -> void:
@@ -521,8 +568,9 @@ func _rebuild() -> void:
 ## AFTER registering the card (_cards resp. _thumb_watchers).
 func _make_card(a: Dictionary, is_downloaded := false) -> Control:
 	var slug := str(a.get("slug", ""))
-	# The chip mirrors BK's plan badge: the honest equivalent for an
-	# all-CC0 catalog is the license itself (type stays on filter/icon).
+	# No chip: a uniform-CC0 catalog makes the license pill pure noise,
+	# and it would cover marks baked into the thumbs (e.g. the Substance
+	# icon on fabric cards). CC0 stays on tooltip + details popup.
 	var card: Control = A2GUI.asset_card(str(a.get("name", "?")), "CC0",
 		"ambientcg", "", null, str(AcgApi.TYPE_ICONS.get(a.get("type", ""), "ImageTexture")),
 		{"remote_slug": slug, "remote_title": str(a.get("name", slug)),
@@ -539,7 +587,7 @@ func _make_card(a: Dictionary, is_downloaded := false) -> Control:
 			"remote_details": Callable(self, "_show_details").bind(slug),
 			"remote_progress": Callable(self, "_remote_progress").bind(slug),
 			"remote_dimensions": null,
-			"remote_kind": str(a.get("type", ""))})
+			"remote_kind": str(a.get("type", ""))}, "", AcgApi.AUTHOR)
 	card.connect("selected", func(_asset): _show_details(slug))
 	card.call("set_downloaded", is_downloaded)
 	return card
@@ -577,15 +625,29 @@ func make_download_card(a: Dictionary) -> Control:
 ## (<target>/<type>/<slug>) — the toggle's "downloaded" view, mirroring
 ## BlendKit's project view. The type dir rides along so disk-only slugs
 ## synthesize a correct asset type and _dl_state_for finds the real path.
+## The disk scan is shared by remote_dir/remote_progress/state — the
+## drop overlay polls those every frame, and an uncached scan would
+## re-list the whole download root each poll. TTL it briefly; a fresh
+## download or delete bumps _disk_slugs_at to force the next call.
+var _disk_slugs := {}
+var _disk_slugs_at := 0.0
+const DISK_SLUG_TTL := 0.5
+
+
 func _downloaded_slugs() -> Dictionary:
 	var slugs := {}
 	for slug in _dl_done:
 		slugs[slug] = str(_dl_done[slug]).get_base_dir().get_file()
-	var base := _target_dir()
-	if DirAccess.dir_exists_absolute(base):
-		for type_dir in DirAccess.get_directories_at(base):
-			for d in DirAccess.get_directories_at(base.path_join(type_dir)):
-				slugs[d] = type_dir
+	var now := Time.get_ticks_msec() / 1000.0
+	if now - _disk_slugs_at > DISK_SLUG_TTL:
+		_disk_slugs_at = now
+		_disk_slugs.clear()
+		var base := _target_dir()
+		if DirAccess.dir_exists_absolute(base):
+			for type_dir in DirAccess.get_directories_at(base):
+				for d in DirAccess.get_directories_at(base.path_join(type_dir)):
+					_disk_slugs[d] = type_dir
+	slugs.merge(_disk_slugs)  # disk state outranks stale _dl_done guesses
 	return slugs
 
 
@@ -706,11 +768,12 @@ func _show_details(slug: String) -> void:
 		return
 	_status.text = "Fetching files for %s…" % str(asset.get("name", slug))
 	_fetch_url(AcgApi.files_url(slug), func(text):
+		var fmt := _fmt_hint_for(asset)
 		var options := AcgApi.flatten_files(JSON.parse_string(text),
-			str(asset.get("type", "")))
+			str(asset.get("type", "")), fmt if fmt else "jpg")
 		var thumb: Texture2D = _thumb_cache.get(str(asset.get("thumbnail_url", "")))
 		_details.state_getter = _dl_state_for.bind(slug)
-		_details.show_asset(asset, options, thumb, _res_hint)
+		_details.show_asset(asset, options, thumb, _res_hint, fmt)
 		_status.text = "")
 
 
@@ -747,13 +810,16 @@ func _remote_options_for(slug: String, cb: Callable) -> void:
 		for e in options:
 			wrapped.append({"key": str(e.get("key", "")),
 				"label": str(e.get("label", "?")), "data": e})
-		cb.call(wrapped, AcgApi.pick_default(options, _res_hint))
+		cb.call(wrapped, AcgApi.pick_default(options, _res_hint,
+			_fmt_hint_for(_asset_by_slug(slug))))
 	if _files_cache.has(slug):
 		answer.call(_files_cache[slug])
 		return
 	_fetch_url(AcgApi.files_url(slug), func(text):
+		var asset := _asset_by_slug(slug)
+		var fmt := _fmt_hint_for(asset)
 		var options := AcgApi.flatten_files(JSON.parse_string(text),
-			str(_asset_by_slug(slug).get("type", "")))
+			str(asset.get("type", "")), fmt if fmt else "jpg")
 		_files_cache[slug] = options
 		answer.call(options))
 
@@ -790,6 +856,7 @@ func _remote_delete(slug: String) -> bool:
 	if not A2GUI.trash_downloaded_dir(_downloaded_dir(slug), _target_dir()):
 		return false
 	_dl_done.erase(slug)
+	_disk_slugs_at = 0.0  # the next disk read must not see it anymore
 	var card: Control = _cards.get(slug)
 	if is_instance_valid(card):
 		card.call("set_downloaded", false)
@@ -987,8 +1054,15 @@ func _dl_finish() -> void:
 	# doesn't feed them to the import bridge.
 	Conversions.organize_materials(_dl_dest)
 	Conversions.materialize_maps(_dl_dest)
+	# Separate opacity maps bake into the albedo's alpha; the material
+	# gets scissor (cutouts) or blend (glass) transparency — flagged as
+	# converting so the state surface keeps reading "Converting…".
+	_converting = true
+	await Conversions.apply_alpha(_dl_dest)
+	_converting = false
 	Conversions.keep_unimported(_dl_dest)
 	_dl_done[slug] = _dl_dest
+	_disk_slugs_at = 0.0
 	_status.text = "Downloaded %s → %s%s" % [str(_dl_asset.get("name", slug)), A2GUI.short_path(_dl_dest), note]
 	var card: Control = _cards.get(slug)
 	if is_instance_valid(card):

@@ -98,11 +98,20 @@ const PREVIEW_IMAGE_EXTS := ["png", "jpg", "jpeg", "tga", "webp", "bmp",
 ## instance configured for a local/indexed asset via setup_a2g(), so every
 ## A2G surface is pixel-identical by construction. `extra` adds context
 ## for the right-click menu ("res", "node", "ext").
-static func asset_card(title: String, kind: String, source: String, path: String, _icon: Texture2D, type_name: String = "", extra: Dictionary = {}) -> Control:
+static func asset_card(title: String, kind: String, source: String, path: String, _icon: Texture2D, type_name: String = "", extra: Dictionary = {}, badge: Variant = null, author := "") -> Control:
 	var item: Control = GALLERY_ITEM.instantiate()
 	var payload := {"path": path, "kind": kind, "source": source}
 	payload.merge(extra)
-	item.setup_a2g(title, kind, type_name, "%s\n%s · %s\n%s" % [title, kind, source, short_path(path)], payload)
+	# Tooltip parity with BlendKit cards: "name\nby author" (upstream's
+	# `author else title` fallback for anonymous assets); the file path
+	# rides a third line for local cards, where it disambiguates.
+	var tip := "%s\nby %s" % [title, author] if author != "" else title
+	if path != "":
+		tip += "\n" + short_path(path)
+	# [param badge] overrides the chip text ("" hides it entirely —
+	# for uniform-license catalogs the pill is noise that also covers
+	# marks baked into the thumb itself); kind still rides the payload.
+	item.setup_a2g(title, str(badge) if badge != null else kind, type_name, tip, payload)
 	item.gui_input.connect(func(ev): _on_card_gui_input(item, ev))
 	item.set_drag_forwarding(_card_drag_data.bind(item), Callable(), Callable())
 	_fix_card_filters(item)

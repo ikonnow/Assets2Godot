@@ -56,6 +56,7 @@ var _thumb_queue: Array = []
 var _thumb_active := 0
 var _cats := {}
 var _res_hint := "2k"
+var _res_btn: OptionButton
 var _local_roots := []
 var _roots_fetched := false
 var _dl_asset: Dictionary = {}
@@ -136,6 +137,12 @@ func _ready() -> void:
 		PhApi.SORT_OPTIONS, func(_i):
 		PhApi.sort_assets(_assets, str(_sort_btn.get_selected_metadata()))
 		_rebuild())
+	# Default = Random — fresh assets on every open instead of the same
+	# Top-Downloads front row; the dropdown still offers the real sorts.
+	for i in _sort_btn.item_count:
+		if str(_sort_btn.get_item_metadata(i)) == "random":
+			_sort_btn.select(i)
+			break
 	_type = _foption(fbar, "Type:", "Filter by asset type.", PhApi.TYPE_OPTIONS,
 		func(_i): _reload())
 	_cat_btn = _foption(fbar, "Category:",
@@ -145,11 +152,20 @@ func _ready() -> void:
 	# item's width — category names run long ("Natural Light (822)").
 	_cat_btn.clip_text = true
 	_cat_btn.fit_to_longest_item = false
-	var res_btn := _foption(fbar, "Resolution:",
+	_res_hint = plugin.provider_resolution(PROVIDER_KEY, "2k") if plugin else "2k"
+	_res_btn = _foption(fbar, "Resolution:",
 		"Preferred resolution, preselected in the download dialog.",
 		[["1k", "1k"], ["2k", "2k"], ["4k", "4k"], ["8k", "8k"]], Callable())
-	res_btn.item_selected.connect(func(i): _res_hint = str(res_btn.get_item_metadata(i)))
-	res_btn.selected = 1
+	_res_btn.item_selected.connect(func(i):
+		_res_hint = str(_res_btn.get_item_metadata(i))
+		if plugin:
+			plugin.set_provider_resolution(PROVIDER_KEY, _res_hint))
+	_select_res(_res_hint)
+	# Settings-dialog changes (provider resolution rows) sync the hint
+	# and the dropdown back while the tab stays open.
+	var _es := EditorInterface.get_editor_settings()
+	if _es and not _es.settings_changed.is_connected(_sync_res):
+		_es.settings_changed.connect(_sync_res)
 	# Status lives at the filter row's end — BlendKit keeps the SearchRow
 	# text-free, its own messages sit inside the scroll body.
 	_status = Label.new()
@@ -211,6 +227,31 @@ func _ready() -> void:
 	if plugin.connection:
 		plugin.connection.connected.connect(_fetch_roots)
 	_reload()
+
+
+## The dropdown row matching [param res], else the 2k default.
+func _select_res(res: String) -> void:
+	for i in _res_btn.item_count:
+		if str(_res_btn.get_item_metadata(i)).to_lower() == res.to_lower():
+			_res_btn.select(i)
+			return
+	_res_btn.select(1)
+
+
+## Re-reads the persisted hint — settings_changed fires on every
+## EditorSettings write, so only touch the dropdown on a real change.
+func _sync_res() -> void:
+	var res: String = plugin.provider_resolution(PROVIDER_KEY, "2k") if plugin else "2k"
+	if res == _res_hint or _res_btn == null:
+		return
+	_res_hint = res
+	_select_res(res)
+
+
+## The provider's texture-format pref (auto/jpg/png) — "auto" while no
+## plugin answers (tests, early init).
+func _tex_pref() -> String:
+	return plugin.texture_format_for(PROVIDER_KEY) if plugin else "auto"
 
 
 func _notification(what: int) -> void:
@@ -426,8 +467,8 @@ func _rebuild() -> void:
 ## AFTER registering the card (_cards resp. _thumb_watchers).
 func _make_card(a: Dictionary, is_downloaded := false) -> Control:
 	var slug := str(a.get("slug", ""))
-	# The chip mirrors BK's plan badge: the honest equivalent for an
-	# all-CC0 catalog is the license itself (type stays on filter/icon).
+	# No chip: a uniform-CC0 catalog makes the license pill pure noise
+	# (CC0 stays on the tooltip + details popup).
 	var card: Control = A2GUI.asset_card(str(a.get("name", "?")), "CC0",
 		"polyhaven", "", null, str(PhApi.TYPE_ICONS.get(a.get("type", ""), "File")),
 		{"remote_slug": slug, "remote_title": str(a.get("name", slug)),
@@ -444,7 +485,8 @@ func _make_card(a: Dictionary, is_downloaded := false) -> Control:
 			"remote_details": Callable(self, "_show_details").bind(slug),
 			"remote_progress": Callable(self, "_remote_progress").bind(slug),
 			"remote_dimensions": func() -> Variant: return _remote_dims_for(slug),
-			"remote_kind": str(a.get("type", ""))})
+			"remote_kind": str(a.get("type", ""))}, "",
+		PhApi.authors_text(a.get("authors", {})))
 	card.connect("selected", func(_asset): _show_details(slug))
 	card.call("set_downloaded", is_downloaded)
 	return card
@@ -482,15 +524,29 @@ func make_download_card(a: Dictionary) -> Control:
 ## (<target>/<type>/<slug>) — the toggle's "downloaded" view, mirroring
 ## BlendKit's project view. The type dir rides along so disk-only slugs
 ## synthesize a correct asset type and _dl_state_for finds the real path.
+## The disk scan is shared by remote_dir/remote_progress/state — the
+## drop overlay polls those every frame, and an uncached scan would
+## re-list the whole download root each poll. TTL it briefly; a fresh
+## download or delete bumps _disk_slugs_at to force the next call.
+var _disk_slugs := {}
+var _disk_slugs_at := 0.0
+const DISK_SLUG_TTL := 0.5
+
+
 func _downloaded_slugs() -> Dictionary:
 	var slugs := {}
 	for slug in _dl_done:
 		slugs[slug] = str(_dl_done[slug]).get_base_dir().get_file()
-	var base := _target_dir()
-	if DirAccess.dir_exists_absolute(base):
-		for type_dir in DirAccess.get_directories_at(base):
-			for d in DirAccess.get_directories_at(base.path_join(type_dir)):
-				slugs[d] = type_dir
+	var now := Time.get_ticks_msec() / 1000.0
+	if now - _disk_slugs_at > DISK_SLUG_TTL:
+		_disk_slugs_at = now
+		_disk_slugs.clear()
+		var base := _target_dir()
+		if DirAccess.dir_exists_absolute(base):
+			for type_dir in DirAccess.get_directories_at(base):
+				for d in DirAccess.get_directories_at(base.path_join(type_dir)):
+					_disk_slugs[d] = type_dir
+	slugs.merge(_disk_slugs)  # disk state outranks stale _dl_done guesses
 	return slugs
 
 
@@ -611,10 +667,12 @@ func _show_details(slug: String) -> void:
 		return
 	_status.text = "Fetching files for %s…" % str(asset.get("name", slug))
 	_fetch_url(PhApi.files_url(slug), func(text):
-		var options := PhApi.flatten_files(JSON.parse_string(text))
+		var tree: Variant = JSON.parse_string(text)
+		var options := PhApi.flatten_files(tree)
+		var ext_hint := PhApi.tex_ext_for(_tex_pref(), PhApi.tree_has_alpha(tree))
 		var thumb: Texture2D = _thumb_cache.get(str(asset.get("thumbnail_url", "")))
 		_details.state_getter = _dl_state_for.bind(slug)
-		_details.show_asset(asset, options, thumb, _res_hint)
+		_details.show_asset(asset, options, thumb, _res_hint, ext_hint)
 		_status.text = "")
 
 
@@ -646,21 +704,25 @@ var _files_cache := {}
 ## The tile contract is {key,label,data} — remote_download hands .data
 ## back, so the flatten entry nests inside it.
 func _remote_options_for(slug: String, cb: Callable) -> void:
-	var answer := func(options: Array):
+	var answer := func(cached: Dictionary):
+		var options: Array = cached.get("options", [])
 		var wrapped := []
 		for e in options:
 			wrapped.append({"key": str(e.get("key", "")),
 				"label": str(e.get("label", "?")), "data": e})
 		cb.call(wrapped, PhApi.pick_default(options, _res_hint,
 			PhApi.fmt_hint_for(str(_asset_by_slug(slug).get("type", "")),
-				options)))
+				options),
+			PhApi.tex_ext_for(_tex_pref(), bool(cached.get("alpha", false)))))
 	if _files_cache.has(slug):
 		answer.call(_files_cache[slug])
 		return
 	_fetch_url(PhApi.files_url(slug), func(text):
-		var options := PhApi.flatten_files(JSON.parse_string(text))
-		_files_cache[slug] = options
-		answer.call(options))
+		var tree: Variant = JSON.parse_string(text)
+		var cached := {"options": PhApi.flatten_files(tree),
+			"alpha": PhApi.tree_has_alpha(tree)}
+		_files_cache[slug] = cached
+		answer.call(cached))
 
 
 ## The tile's Download action — the chosen option is a flatten_files
@@ -695,6 +757,7 @@ func _remote_delete(slug: String) -> bool:
 	if not A2GUI.trash_downloaded_dir(_downloaded_dir(slug), _target_dir()):
 		return false
 	_dl_done.erase(slug)
+	_disk_slugs_at = 0.0  # the next disk read must not see it anymore
 	var card: Control = _cards.get(slug)
 	if is_instance_valid(card):
 		card.call("set_downloaded", false)
@@ -876,8 +939,15 @@ func _dl_finish() -> void:
 	# surviving .blends get keep-marked for the import bridge.
 	Conversions.organize_materials(_dl_dest)
 	Conversions.materialize_maps(_dl_dest)
+	# Separate opacity maps bake into the albedo's alpha; the material
+	# gets scissor (cutouts) or blend (glass) transparency — flagged as
+	# converting so the state surface keeps reading "Converting…".
+	_converting = true
+	await Conversions.apply_alpha(_dl_dest)
+	_converting = false
 	Conversions.keep_unimported(_dl_dest)
 	_dl_done[slug] = _dl_dest
+	_disk_slugs_at = 0.0
 	_status.text = "Downloaded %s → %s%s" % [str(_dl_asset.get("name", slug)), A2GUI.short_path(_dl_dest), note]
 	var card: Control = _cards.get(slug)
 	if is_instance_valid(card):
