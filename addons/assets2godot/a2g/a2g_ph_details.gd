@@ -17,6 +17,7 @@ signal author_selected(author: String)
 
 const PhApi = preload("res://addons/assets2godot/a2g/polyhaven_api.gd")
 const FileReveal = preload("res://addons/assets2godot/ui/file_reveal.gd")
+const ZoomView = preload("res://addons/assets2godot/a2g/a2g_zoom_view.gd")
 const MONTHS := ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 const DESCRIPTION_MAX_HEIGHT := 200
 
@@ -24,7 +25,7 @@ var asset: Dictionary = {}
 ## Returns {"dir": "…" if downloaded else "", "downloading": bool}.
 var state_getter := Callable()
 
-var _preview: TextureRect
+var _preview: ZoomView
 var _frame: PanelContainer
 var _badge: Label
 var _strip: HBoxContainer
@@ -44,6 +45,8 @@ var _note: Label
 var _file_option: OptionButton
 var _action: Button
 var _files: Array = []
+## The resolved texture-format hint ("" = none) — set by show_asset.
+var _ext_hint := ""
 var _req: HTTPRequest
 ## Frame the dialog last opened — _close_if_outside ignores focus churn on
 ## that same frame (asset_details' guard against instant self-close).
@@ -72,11 +75,10 @@ func _ready() -> void:
 	# PanelContainer — the theme's own dark panel shows through the
 	# render's transparent margins, never a white box.
 	left.add_child(_frame)
-	_preview = TextureRect.new()
+	# ZoomView replaces the TextureRect — same letterboxed fit as
+	# STRETCH_KEEP_ASPECT_CENTERED, plus wheel-zoom/drag-pan in place.
+	_preview = ZoomView.new()
 	_preview.custom_minimum_size = Vector2.ONE * 400 * edscale
-	_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	# same as asset_details.tscn — letterbox any preview aspect, no crop
-	_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_frame.add_child(_preview)
 	_badge = Label.new()
 	_badge.text = "CC0"
@@ -95,6 +97,7 @@ func _ready() -> void:
 	_badge.offset_right = -6 * edscale
 	_badge.offset_top = -6 * edscale
 	_badge.offset_bottom = -6 * edscale
+	_badge.mouse_filter = Control.MOUSE_FILTER_PASS
 	_preview.add_child(_badge)
 	_strip = HBoxContainer.new()
 	_strip.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -204,9 +207,10 @@ func _ready() -> void:
 ## Show [param new_asset] (parsed /assets entry) with the flattened file
 ## options and the thumbnail texture the card already had — the primary
 ## render streams in on top once fetched.
-func show_asset(new_asset: Dictionary, options: Array, thumb: Texture2D, res_hint: String) -> void:
+func show_asset(new_asset: Dictionary, options: Array, thumb: Texture2D, res_hint: String, ext_hint := "") -> void:
 	asset = new_asset
 	_files = options
+	_ext_hint = ext_hint
 	var slug := str(asset.get("slug", ""))
 	title = str(asset.get("name", slug))
 	_title_label.text = title
@@ -234,11 +238,6 @@ func show_asset(new_asset: Dictionary, options: Array, thumb: Texture2D, res_hin
 		_textures["thumb"] = thumb
 		_set_frame("thumb")
 	_rebuild_strip()
-	# The primary render streams in after open — with a thumb present the
-	# strip will get its second button, so reserve the row up front and
-	# the dialog doesn't grow mid-view.
-	_strip.custom_minimum_size.y = 64 * EditorInterface.get_editor_scale() \
-		if _textures.has("thumb") else 0.0
 	_fetch_preview(slug)
 	refresh_state()
 	# asset_details' opening math: wrapped text is as tall as it is at its
@@ -301,9 +300,12 @@ func _fetch_preview(slug: String) -> void:
 			err = img.load_jpg_from_buffer(body)
 		if err == OK:
 			_textures["primary"] = ImageTexture.create_from_image(img)
+			# The thumb was only a placeholder while the render streamed in —
+			# once the better one exists it's the only frame the dialog shows.
+			_textures.erase("thumb")
 			_set_frame("primary")
 			_rebuild_strip())
-	if _req.request(PhApi.preview_url(slug), [PhApi.UA_HEADER]) != OK:
+	if _req.request(PhApi.preview_url(slug, 2048), [PhApi.UA_HEADER]) != OK:
 		_req.queue_free()
 		_req = null
 
@@ -427,7 +429,7 @@ func _fill_files(res_hint: String) -> void:
 		_file_option.add_item(str(_files[i].get("label", "?")), i)
 		_file_option.set_item_metadata(i, _files[i])
 	var pick := PhApi.pick_default(_files, res_hint,
-		PhApi.fmt_hint_for(str(asset.get("type", "")), _files))
+		PhApi.fmt_hint_for(str(asset.get("type", "")), _files), _ext_hint)
 	if pick >= 0:
 		_file_option.select(pick)
 	_file_option.disabled = _file_option.item_count == 0

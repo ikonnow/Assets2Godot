@@ -17,6 +17,7 @@ signal author_selected(author: String)
 
 const AcgApi = preload("res://addons/assets2godot/a2g/ambientcg_api.gd")
 const FileReveal = preload("res://addons/assets2godot/ui/file_reveal.gd")
+const ZoomView = preload("res://addons/assets2godot/a2g/a2g_zoom_view.gd")
 const MONTHS := ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 const DESCRIPTION_MAX_HEIGHT := 200
 
@@ -24,7 +25,7 @@ var asset: Dictionary = {}
 ## Returns {"dir": "…" if downloaded else "", "downloading": bool}.
 var state_getter := Callable()
 
-var _preview: TextureRect
+var _preview: ZoomView
 var _frame: PanelContainer
 var _badge: Label
 var _strip: HBoxContainer
@@ -41,9 +42,15 @@ var _tags_row: HBoxContainer
 var _tags_key: Label
 var _tags: RichTextLabel
 var _note: Label
+var _hint: PanelContainer
+var _hint_text: RichTextLabel
+var _get_player: Button
+var _open_sbsar: Button
 var _file_option: OptionButton
 var _action: Button
 var _files: Array = []
+## The resolved texture-format hint ("" = none) — set by show_asset.
+var _fmt_hint := ""
 var _req: HTTPRequest
 ## Frame the dialog last opened — _close_if_outside ignores focus churn on
 ## that same frame (asset_details' guard against instant self-close).
@@ -72,11 +79,10 @@ func _ready() -> void:
 	# PanelContainer — the theme's own dark panel shows through the
 	# render's transparent margins, never a white box.
 	left.add_child(_frame)
-	_preview = TextureRect.new()
+	# ZoomView replaces the TextureRect — same letterboxed fit as
+	# STRETCH_KEEP_ASPECT_CENTERED, plus wheel-zoom/drag-pan in place.
+	_preview = ZoomView.new()
 	_preview.custom_minimum_size = Vector2.ONE * 400 * edscale
-	_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	# same as asset_details.tscn — letterbox any preview aspect, no crop
-	_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_frame.add_child(_preview)
 	_badge = Label.new()
 	_badge.text = "CC0"
@@ -95,12 +101,14 @@ func _ready() -> void:
 	_badge.offset_right = -6 * edscale
 	_badge.offset_top = -6 * edscale
 	_badge.offset_bottom = -6 * edscale
+	_badge.mouse_filter = Control.MOUSE_FILTER_PASS
 	_preview.add_child(_badge)
 	_strip = HBoxContainer.new()
 	_strip.alignment = BoxContainer.ALIGNMENT_CENTER
 	left.add_child(_strip)
 	_description = RichTextLabel.new()
 	_description.fit_content = true
+	_description.bbcode_enabled = true
 	_description.selection_enabled = true
 	_description.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
 	_description.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
@@ -162,6 +170,44 @@ func _ready() -> void:
 	_tags.add_theme_stylebox_override("normal", tags_box)
 	_tags.add_theme_stylebox_override("focus", tags_box)
 
+	# Callout box for workflow hints (e.g. substance → Player export):
+	# tinted panel with a left accent bar + info icon + wrapped text —
+	# the docs/inspector admonition pattern, hidden unless filled.
+	_hint = PanelContainer.new()
+	var hint_box := StyleBoxFlat.new()
+	var accent := get_theme_color("accent_color", "Editor")
+	hint_box.bg_color = Color(accent, 0.08)
+	hint_box.border_color = Color(accent, 0.45)
+	hint_box.border_width_left = int(3 * edscale)
+	hint_box.set_corner_radius_all(int(4 * edscale))
+	hint_box.set_content_margin_all(int(8 * edscale))
+	hint_box.content_margin_left = int(10 * edscale)
+	_hint.add_theme_stylebox_override("panel", hint_box)
+	_hint.visible = false
+	var hint_row := HBoxContainer.new()
+	hint_row.add_theme_constant_override("separation", int(8 * edscale))
+	_hint.add_child(hint_row)
+	var hint_icon := TextureRect.new()
+	if has_theme_icon("NodeInfo", "EditorIcons"):
+		hint_icon.texture = get_theme_icon("NodeInfo", "EditorIcons")
+	hint_icon.modulate = accent
+	hint_icon.custom_minimum_size = Vector2.ONE * int(16 * edscale)
+	hint_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	hint_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	hint_icon.size_flags_vertical = 0
+	hint_row.add_child(hint_icon)
+	_hint_text = RichTextLabel.new()
+	_hint_text.bbcode_enabled = true
+	_hint_text.fit_content = true
+	_hint_text.scroll_active = false
+	_hint_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_hint_text.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+	_hint_text.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	_hint_text.add_theme_color_override("default_color", get_theme_color("font_color", "Label"))
+	_hint_text.meta_clicked.connect(func(meta): OS.shell_open(str(meta)))
+	hint_row.add_child(_hint_text)
+	_right.add_child(_hint)
+
 	_note = Label.new()
 	_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -193,6 +239,23 @@ func _ready() -> void:
 	web.text = "View on ambientcg.com"
 	web.pressed.connect(func(): OS.shell_open(AcgApi.web_url(str(asset.get("slug", "")))))
 	right_box.add_child(web)
+	# Substance-only actions (refresh_state gates them): Player missing
+	# → the official page; .sbsar on disk → open it through the OS
+	# association (resolves to Player when installed).
+	_get_player = Button.new()
+	_get_player.text = "Get Substance Player"
+	_get_player.tooltip_text = "Free .sbsar renderer — exports the maps Godot can use."
+	_get_player.visible = false
+	_get_player.pressed.connect(func(): OS.shell_open(AcgApi.PLAYER_URL))
+	right_box.add_child(_get_player)
+	_open_sbsar = Button.new()
+	_open_sbsar.visible = false
+	_open_sbsar.pressed.connect(func():
+		var st: Dictionary = state_getter.call() if state_getter.is_valid() else {}
+		var sbsar := AcgApi.find_sbsar(str(st.get("dir", "")))
+		if sbsar != "":
+			OS.shell_open(sbsar))
+	right_box.add_child(_open_sbsar)
 
 	get_ok_button().hide()
 	add_theme_constant_override("buttons_separation", 0)
@@ -204,9 +267,10 @@ func _ready() -> void:
 ## Show [param new_asset] (parsed catalog entry) with the flattened file
 ## options and the thumbnail texture the card already had — the big still
 ## render streams in on top once fetched.
-func show_asset(new_asset: Dictionary, options: Array, thumb: Texture2D, res_hint: String) -> void:
+func show_asset(new_asset: Dictionary, options: Array, thumb: Texture2D, res_hint: String, fmt_hint := "") -> void:
 	asset = new_asset
 	_files = options
+	_fmt_hint = fmt_hint
 	var slug := str(asset.get("slug", ""))
 	title = str(asset.get("name", slug))
 	_title_label.text = title
@@ -219,6 +283,14 @@ func show_asset(new_asset: Dictionary, options: Array, thumb: Texture2D, res_hin
 		desc_text = str(asset.get("short_description", "")).strip_edges()
 	_description.text = desc_text
 	_description.visible = not _description.text.is_empty()
+	# SBSAR has no Godot importer — substance assets get the workflow
+	# callout on the right pane instead of a silent dead end.
+	_hint.visible = str(asset.get("type", "")) == "substance"
+	if _hint.visible:
+		_hint_text.text = "SBSAR can't be loaded in Godot. Open it in " \
+			+ "[url=%s]Substance 3D Player[/url] (free), " % AcgApi.PLAYER_URL \
+			+ "tune the parameters and export the maps into the asset's folder — " \
+			+ "they land in the index as a regular map set."
 	_description.fit_content = true
 	_description.custom_minimum_size.y = 0
 	_fill_params()
@@ -232,11 +304,6 @@ func show_asset(new_asset: Dictionary, options: Array, thumb: Texture2D, res_hin
 		_textures["thumb"] = thumb
 		_set_frame("thumb")
 	_rebuild_strip()
-	# The big render streams in after open — with a thumb present the
-	# strip will get its second button, so reserve the row up front and
-	# the dialog doesn't grow mid-view.
-	_strip.custom_minimum_size.y = 64 * EditorInterface.get_editor_scale() \
-		if _textures.has("thumb") else 0.0
 	_fetch_preview(str(asset.get("preview_url", "")))
 	refresh_state()
 	# asset_details' opening math: wrapped text is as tall as it is at its
@@ -269,6 +336,15 @@ func _set_text_widths() -> void:
 	_set_text_width(_description, pane)
 	_set_text_width(_tags, pane - _tags_key.get_combined_minimum_size().x \
 		- _tags_row.get_theme_constant("separation"))
+	# Same treatment for the callout's wrapped text — without a width
+	# fit_content reports a height for its minimum width and the whole
+	# dialog opens at 90% screen height with empty space.
+	var hint_box := _hint.get_theme_stylebox("panel")
+	var hint_row := _hint_text.get_parent() as Container
+	_set_text_width(_hint_text, pane \
+		- hint_box.get_margin(SIDE_LEFT) - hint_box.get_margin(SIDE_RIGHT) \
+		- hint_row.get_theme_constant("separation") \
+		- 16 * EditorInterface.get_editor_scale())
 	_set_text_width(_note, content_width)
 
 
@@ -301,6 +377,9 @@ func _fetch_preview(url: String) -> void:
 			err = img.load_jpg_from_buffer(body)
 		if err == OK:
 			_textures["primary"] = ImageTexture.create_from_image(img)
+			# The thumb was only a placeholder while the render streamed in —
+			# once the better one exists it's the only frame the dialog shows.
+			_textures.erase("thumb")
 			_set_frame("primary")
 			_rebuild_strip())
 	if _req.request(url, [AcgApi.UA_HEADER]) != OK:
@@ -413,7 +492,7 @@ func _fill_files(res_hint: String) -> void:
 	for i in _files.size():
 		_file_option.add_item(str(_files[i].get("label", "?")), i)
 		_file_option.set_item_metadata(i, _files[i])
-	var pick := AcgApi.pick_default(_files, res_hint)
+	var pick := AcgApi.pick_default(_files, res_hint, _fmt_hint)
 	if pick >= 0:
 		_file_option.select(pick)
 	_file_option.disabled = _file_option.item_count == 0
@@ -422,12 +501,19 @@ func _fill_files(res_hint: String) -> void:
 ## Download / Downloading… / Show File — the tab answers via state_getter.
 func refresh_state() -> void:
 	var st: Dictionary = state_getter.call() if state_getter.is_valid() else {}
+	var dir := str(st.get("dir", ""))
+	# Substance actions: Player detection picks which door is offered —
+	# none installed → "Get"; .sbsar on disk → "Open in" via association.
+	var is_sub := str(asset.get("type", "")) == "substance"
+	var player_found := AcgApi.substance_player_path() != ""
+	_get_player.visible = is_sub and not player_found
+	_open_sbsar.visible = is_sub and AcgApi.find_sbsar(dir) != ""
+	_open_sbsar.text = "Open in Substance Player" if player_found else "Open .sbsar file"
 	_action.disabled = false
 	if st.get("downloading", false):
 		_action.text = "Downloading…"
 		_action.disabled = true
 		return
-	var dir := str(st.get("dir", ""))
 	if not dir.is_empty():
 		_action.text = "Show File"
 		_action.tooltip_text = "Show the downloaded folder in the file manager."
