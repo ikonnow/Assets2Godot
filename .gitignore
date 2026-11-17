@@ -10,8 +10,6 @@
 # /bk_assets kept for old layouts.
 /bk_assets
 /Assets2Godot/*/
-# godot-ai MCP addon (user-installed editor tooling, not ours)
-/addons/godot_ai
 /out
 .godot
 __pycache__
@@ -22,8 +20,5 @@ __pycache__
 # Godot Launcher per-project marker
 .godotlauncher
 
-# local MCP scratch helper + probe outputs
+# local scratch helpers + probe outputs
 /tests/_*
-
-# Playwright MCP session artifacts
-.playwright-mcp/
