@@ -60,6 +60,14 @@ const HOST_RECHECK := 30
 ## unimported: after this long the import wait rescans once — and after
 ## that rescan, gives up.
 const IMPORT_IDLE_MS := 1000
+## A download that showed life (progress > 0 or a payload folder) and
+## then reports the same numbers for this long is stalled — the poll
+## would otherwise pin "Downloading A2G" on screen forever.
+const STALL_MS := 20000
+## The same check before any sign of life: prog=-1 + no dir is the
+## provider's queue wait ("busy elsewhere or total unknown"), which is
+## legitimate for a while — but not forever.
+const STALL_IDLE_MS := 45000
 
 const PLACE_COLOR := Color(0.25, 0.6, 1.0, 0.35)
 const PLACE_EMPTY := Color(0.25, 0.6, 1.0, 0.06)
@@ -95,6 +103,11 @@ var _remote_point := Vector3.ZERO
 var _remote_wait := 0
 var _import_idle_since := 0
 var _import_nudged := false
+var _last_prog := -2.0
+var _last_dir := "__none__"
+var _last_label := ""
+var _remote_saw_life := false
+var _prog_stall_ms := 0
 var _host_tick := 0
 
 
@@ -592,6 +605,11 @@ func _start_remote(data: Dictionary, kind: String, point: Vector3,
 	_remote_wait = 0
 	_import_idle_since = 0
 	_import_nudged = false
+	_last_prog = -2.0
+	_last_dir = "__none__"
+	_last_label = ""
+	_remote_saw_life = false
+	_prog_stall_ms = 0
 	set_process(true)
 	# "Already downloaded" = progress 1.0 AND the payload we'd commit
 	# is actually there — a folder can exist while being useless
@@ -672,6 +690,27 @@ func _poll_remote() -> void:
 			"abort":
 				_abort_remote("the editor did not import the material's maps")
 		return
+	# Stall watchdog: the label is pinned every poll, so a frozen
+	# progress must die on its own instead of camping the viewport.
+	# Sits after the import wait — that path owns its own clock and a
+	# constant prog=1.0 there is the wait working, not a stall.
+	# "Converting…" is the provider's own "alive but unmeasurable"
+	# phase (Blender subprocess, no byte signal) — not a stall.
+	var state := _remote_state_now()
+	var label := str(state.get("label", "Downloading A2G"))
+	if prog > 0.0 or dir != "":
+		_remote_saw_life = true
+	if prog != _last_prog or dir != _last_dir or label != _last_label:
+		_last_prog = prog
+		_last_dir = dir
+		_last_label = label
+		_prog_stall_ms = Time.get_ticks_msec()
+	elif _prog_stall_ms != 0 and not label.begins_with("Converting") \
+			and Time.get_ticks_msec() - _prog_stall_ms \
+				> (STALL_MS if _remote_saw_life else STALL_IDLE_MS):
+		_abort_remote("download stalled" if _remote_saw_life \
+			else "download never started")
+		return
 	# remote_dir is a disk check on in-plugin providers — the dest
 	# folder exists the moment the download STARTS, so dir != "" alone
 	# fires mid-download and the place-scan sees an empty folder. And
@@ -680,11 +719,9 @@ func _poll_remote() -> void:
 	if dir != "" and prog >= 1.0 and _remote_payload_ready(dir):
 		_finish_remote()
 		return
-	var state := _remote_state_now()
 	_remote_wait += 1
 	if prog >= 0.0 and _ghost_mat != null:
 		_ghost_mat.set_shader_parameter("progress", prog)
-	var label := str(state.get("label", "Downloading A2G"))
 	if label.begins_with("Downloading"):
 		label = "Downloading A2G"
 	_show_status(label if prog < 0.0 else "%s %d%%" % [label, int(prog * 100.0)])
@@ -733,6 +770,11 @@ func _reset_remote() -> void:
 	_remote_wait = 0
 	_import_idle_since = 0
 	_import_nudged = false
+	_last_prog = -2.0
+	_last_dir = "__none__"
+	_last_label = ""
+	_remote_saw_life = false
+	_prog_stall_ms = 0
 	_show_status("")
 	_clear_ghost()
 

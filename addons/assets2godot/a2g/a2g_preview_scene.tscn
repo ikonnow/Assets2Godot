@@ -119,9 +119,13 @@ surface_material_override/0 = SubResource("StandardMaterial3D_pad")
 [node name="DropTargets" type="Node3D" parent="."]
 
 [node name="LblTargets" type="Label3D" parent="DropTargets"]
-transform = Transform3D(2.5, 0, 0, 0, 2.5, 0, 0, 0, 2.5, -2, 3, -8)
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, -2, 3, -8)
 billboard = 1
-text = "DROP TARGETS"
+modulate = Color(1, 1, 1, 1)
+outline_modulate = Color(0, 0, 0, 0.4)
+font_size = 48
+outline_size = 8
+text = "D R O P   T A R G E T S"
 
 [node name="Wall" type="MeshInstance3D" parent="DropTargets"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 1, -8)
@@ -151,9 +155,13 @@ surface_material_override/0 = SubResource("StandardMaterial3D_neutral")
 [node name="References" type="Node3D" parent="."]
 
 [node name="LblRefs" type="Label3D" parent="References"]
-transform = Transform3D(2.5, 0, 0, 0, 2.5, 0, 0, 0, 2.5, 0, 1.8, 7)
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 1.8, 7)
 billboard = 1
-text = "REFERENCES"
+modulate = Color(1, 1, 1, 1)
+outline_modulate = Color(0, 0, 0, 0.4)
+font_size = 48
+outline_size = 8
+text = "R E F E R E N C E S"
 
 [node name="ChromeBall" type="MeshInstance3D" parent="References"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0.5, 7)
@@ -203,9 +211,13 @@ surface_material_override/0 = SubResource("StandardMaterial3D_blue")
 [node name="ScaleRow" type="Node3D" parent="."]
 
 [node name="LblScale" type="Label3D" parent="ScaleRow"]
-transform = Transform3D(2.5, 0, 0, 0, 2.5, 0, 0, 0, 2.5, 12.5, 3, 5)
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 12.5, 3, 5)
 billboard = 1
-text = "SCALE"
+modulate = Color(1, 1, 1, 1)
+outline_modulate = Color(0, 0, 0, 0.4)
+font_size = 48
+outline_size = 8
+text = "S C A L E"
 
 [node name="Cube025" type="MeshInstance3D" parent="ScaleRow"]
 transform = Transform3D(0.25, 0, 0, 0, 0.25, 0, 0, 0, 0.25, 9, 0.125, 2)
@@ -233,9 +245,13 @@ mesh = SubResource("BoxMesh_unit")
 surface_material_override/0 = SubResource("StandardMaterial3D_neutral")
 
 [node name="LblStages" type="Label3D" parent="."]
-transform = Transform3D(2.5, 0, 0, 0, 2.5, 0, 0, 0, 2.5, -14, 3.5, -11)
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, -14, 3.5, -11)
 billboard = 1
-text = "PROVIDER STAGES"
+modulate = Color(1, 1, 1, 1)
+outline_modulate = Color(0, 0, 0, 0.4)
+font_size = 48
+outline_size = 8
+text = "P R O V I D E R   S T A G E S"
 
 [node name="PolyhavenStage" parent="." instance=ExtResource("1")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 0, -6)
@@ -245,13 +261,15 @@ provider = "polyhaven"
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 0, -16)
 provider = "ambientcg"
 
+[node name="AutoPlaced" type="Node3D" parent="."]
+
 [node name="PreviewUI" type="CanvasLayer" parent="."]
 
 [node name="Panel" type="PanelContainer" parent="PreviewUI"]
 offset_left = 12.0
 offset_top = 12.0
-offset_right = 220.0
-offset_bottom = 150.0
+offset_right = 240.0
+offset_bottom = 300.0
 
 [node name="Margin" type="MarginContainer" parent="PreviewUI/Panel"]
 theme_override_constants/margin_left = 10
@@ -267,23 +285,76 @@ text = "A2G Preview"
 
 [node name="Sep" type="HSeparator" parent="PreviewUI/Panel/Margin/VBox"]
 
-[node name="HdriCheck" type="CheckBox" parent="PreviewUI/Panel/Margin/VBox"]
+[node name="SkyCheck" type="CheckBox" parent="PreviewUI/Panel/Margin/VBox"]
 button_pressed = true
-text = "HDRI sky"
+text = "Activate sky"
 
-[node name="TilingRow" type="HBoxContainer" parent="PreviewUI/Panel/Margin/VBox"]
+[node name="SkyRow" type="HBoxContainer" parent="PreviewUI/Panel/Margin/VBox"]
 
-[node name="LblT" type="Label" parent="PreviewUI/Panel/Margin/VBox/TilingRow"]
-text = "Tiling"
+[node name="LblS" type="Label" parent="PreviewUI/Panel/Margin/VBox/SkyRow"]
+text = "Sky energy"
 
-[node name="TilingSlider" type="HSlider" parent="PreviewUI/Panel/Margin/VBox/TilingRow"]
-custom_minimum_size = Vector2(110, 0)
+[node name="SkySlider" type="HSlider" parent="PreviewUI/Panel/Margin/VBox/SkyRow"]
+custom_minimum_size = Vector2(90, 0)
+size_flags_horizontal = 3
+max_value = 2.0
+step = 0.05
+value = 1.0
+
+[node name="SkyVal" type="Label" parent="PreviewUI/Panel/Margin/VBox/SkyRow"]
+custom_minimum_size = Vector2(48, 0)
+text = "×1.00"
+
+[node name="UvRow" type="HBoxContainer" parent="PreviewUI/Panel/Margin/VBox"]
+
+[node name="LblU" type="Label" parent="PreviewUI/Panel/Margin/VBox/UvRow"]
+text = "Ground UV"
+
+[node name="UvSlider" type="HSlider" parent="PreviewUI/Panel/Margin/VBox/UvRow"]
+custom_minimum_size = Vector2(90, 0)
 size_flags_horizontal = 3
 min_value = 0.25
 max_value = 8.0
 step = 0.25
 value = 1.0
 
-[node name="TilingVal" type="Label" parent="PreviewUI/Panel/Margin/VBox/TilingRow"]
+[node name="UvVal" type="Label" parent="PreviewUI/Panel/Margin/VBox/UvRow"]
 custom_minimum_size = Vector2(48, 0)
 text = "×1.00"
+
+[node name="Sep2" type="HSeparator" parent="PreviewUI/Panel/Margin/VBox"]
+
+[node name="LblZones" type="Label" parent="PreviewUI/Panel/Margin/VBox"]
+text = "Zones"
+
+[node name="ZoneGrid" type="GridContainer" parent="PreviewUI/Panel/Margin/VBox"]
+columns = 2
+
+[node name="ZnRefs" type="CheckBox" parent="PreviewUI/Panel/Margin/VBox/ZoneGrid"]
+button_pressed = true
+text = "References"
+
+[node name="ZnTargets" type="CheckBox" parent="PreviewUI/Panel/Margin/VBox/ZoneGrid"]
+button_pressed = true
+text = "Targets"
+
+[node name="ZnScale" type="CheckBox" parent="PreviewUI/Panel/Margin/VBox/ZoneGrid"]
+button_pressed = true
+text = "Scale"
+
+[node name="ZnStages" type="CheckBox" parent="PreviewUI/Panel/Margin/VBox/ZoneGrid"]
+button_pressed = true
+text = "Stages"
+
+[node name="Sep3" type="HSeparator" parent="PreviewUI/Panel/Margin/VBox"]
+
+[node name="BtnRow" type="HBoxContainer" parent="PreviewUI/Panel/Margin/VBox"]
+theme_override_constants/separation = 8
+
+[node name="BtnAutoplace" type="Button" parent="PreviewUI/Panel/Margin/VBox/BtnRow"]
+size_flags_horizontal = 3
+text = "Autoplace"
+
+[node name="BtnRandom" type="Button" parent="PreviewUI/Panel/Margin/VBox/BtnRow"]
+size_flags_horizontal = 3
+text = "Random place"
