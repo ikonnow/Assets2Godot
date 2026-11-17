@@ -514,7 +514,7 @@ static func _bk_remote_entry(asset: Dictionary, gallery: Control) -> Dictionary:
 	var plugin = gallery.get("plugin")
 	if plugin == null or not is_instance_valid(plugin):
 		return {}
-	var opts := _bk_options(asset, plugin)
+	var opts := _bk_options(asset)
 	var default_ft := GalleryApi.pick_file_type(asset,
 		str(plugin.model_format), plugin.download_resolution())
 	var default_idx := -1
@@ -554,7 +554,7 @@ static func _bk_progress(asset: Dictionary, gallery: Control) -> float:
 	return 1.0 if gallery.is_downloaded(asset) else -1.0
 
 
-static func _bk_options(asset: Dictionary, plugin) -> Array:
+static func _bk_options(asset: Dictionary) -> Array:
 	var opts := []
 	for ft in GalleryApi.downloadable_file_types(asset):
 		opts.append({"key": ft, "label": GalleryApi.file_type_label(ft), "data": ft})

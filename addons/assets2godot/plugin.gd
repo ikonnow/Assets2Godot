@@ -58,7 +58,7 @@ const USER_GUIDE_URL = "https://www.blendkit.com/blendkit-in-godot/"
 const SOURCES_URL = "https://github.com/ikonnow/Assets2Godot"
 const ISSUES_URL = "https://github.com/ikonnow/Assets2Godot/issues"
 
-const gallery_scene = preload("res://addons/assets2godot/ui/gallery/gallery.tscn")
+const GalleryScene = preload("res://addons/assets2godot/ui/gallery/gallery.tscn")
 const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
 const A2GDock = preload("res://addons/assets2godot/a2g/a2g_dock.gd")
 const A2GBrowser = preload("res://addons/assets2godot/a2g/a2g_browser.gd")
@@ -435,7 +435,7 @@ func init_gallery() -> void:
 	_ctx_scene = A2GContextPlugin.new(EditorContextMenuPlugin.CONTEXT_SLOT_SCENE_TREE)
 	_ctx_scene.browse_scene_resources.connect(func(): open_a2g("scene"))
 	add_context_menu_plugin(EditorContextMenuPlugin.CONTEXT_SLOT_SCENE_TREE, _ctx_scene)
-	gallery = gallery_scene.instantiate()
+	gallery = GalleryScene.instantiate()
 	gallery.plugin = self
 	gallery.name = "BlendKit"
 	# Right-click quick download on BlendKit cards too — the same compact

@@ -191,9 +191,9 @@ func _ready() -> void:
 	_select_res(_res_hint)
 	# Settings-dialog changes (provider resolution rows) sync the hint
 	# and the dropdown back while the tab stays open.
-	var _es := EditorInterface.get_editor_settings()
-	if _es and not _es.settings_changed.is_connected(_sync_res):
-		_es.settings_changed.connect(_sync_res)
+	var editor_settings := EditorInterface.get_editor_settings()
+	if editor_settings and not editor_settings.settings_changed.is_connected(_sync_res):
+		editor_settings.settings_changed.connect(_sync_res)
 	# Status lives at the filter row's end — BlendKit keeps the SearchRow
 	# text-free, its own messages sit inside the scroll body.
 	_status = Label.new()
