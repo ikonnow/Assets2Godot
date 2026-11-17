@@ -517,7 +517,7 @@ func _reveal_placed() -> void:
 ## the branch stays reachable) and their whole subtrees. Everything
 ## solo hides is recorded and restored verbatim on uncheck; nodes
 ## that were already hidden are left alone both ways.
-func _set_solo(on: bool) -> void:  # isolate selection
+func _set_solo(on: bool) -> void:
 	if on == _solo_active:
 		return
 	_solo_active = on
