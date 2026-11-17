@@ -582,12 +582,27 @@ func _sync_preview() -> void:
 	if not is_instance_valid(_preview_scene):
 		_preview_scene = null
 	var root := EditorInterface.get_edited_scene_root()
-	var want := preview_scene_enabled() and root != null
+	# Never inject into the preview scene itself: a nested copy would
+	# double the stage and its viewport panel would fight the open
+	# scene's own one.
+	var want := preview_scene_enabled() and root != null \
+			and root.scene_file_path != PREVIEW_SCENE_PATH
 	if _preview_scene != null and (not want or _preview_scene.get_parent() != root):
 		_preview_scene.queue_free()
 		_preview_scene = null
+	if root != null:
+		# A plugin reload drops the member but leaves the hidden
+		# INTERNAL child — the orphan keeps running and parks a second
+		# viewport panel. Reap by scene path, internal children included.
+		for c in root.get_children(true):
+			if c != _preview_scene \
+					and c.scene_file_path == PREVIEW_SCENE_PATH:
+				c.queue_free()
 	if want and _preview_scene == null:
-		var packed: PackedScene = load(PREVIEW_SCENE_PATH)
+		# REPLACE: never instance a stale cached layout — the panel
+		# anchors changed once already and would park at the old spot.
+		var packed := ResourceLoader.load(PREVIEW_SCENE_PATH, "",
+				ResourceLoader.CACHE_MODE_REPLACE) as PackedScene
 		if packed == null:
 			return
 		_preview_scene = packed.instantiate() as Node3D

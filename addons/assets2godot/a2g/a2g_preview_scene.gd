@@ -60,6 +60,10 @@ const SKY_EXTS := ["hdr", "exr"]
 const SCAN_DEPTH := 4
 const SCATTER_COUNT := 3
 const PANEL_NAME := "A2GPreviewPanel"
+## Identity marker that survives add_child auto-renames — a second
+## parked panel gets renamed "@PanelContainer@<id>" and escapes every
+## name match.
+const PANEL_GROUP := "a2g_preview_panel"
 ## The editor rebuilds the viewport's input surface at its own pace —
 ## the panel re-attaches on this cadence, same rule as the drop overlay.
 const HOST_RECHECK := 45
@@ -84,6 +88,7 @@ func _ready() -> void:
 		call_deferred("_attach_editor_panel")
 		return
 	_wire_ui($PreviewUI/Panel/Margin/VBox)
+	_sync_controls($PreviewUI/Panel/Margin/VBox)
 
 
 func _process(_dt: float) -> void:
@@ -105,19 +110,80 @@ func _exit_tree() -> void:
 ## input surface is where Control children actually receive input in an
 ## edited scene (the drop overlay lives there too); parking the panel
 ## inside the scene itself would render it unclickable.
+##
+## Several copies of this scene can be alive at once — an injected
+## instance, the .tscn open in a tab, an orphan left by a plugin
+## reload. To keep exactly ONE panel, each parks with an "a2g_owner"
+## meta pointing at its instance: a sweep over the whole editor tree
+## frees orphans and pre-meta leftovers (the old surface-children sweep
+## missed strays in rebuilt hosts), a live in-tree foreign owner keeps
+## the slot, and the edited scene root outranks injected copies so the
+## scene the user is actually editing drives the panel.
 func _attach_editor_panel() -> void:
+	if not Engine.is_editor_hint():
+		set_process(false)
+		return
+	if not is_inside_tree():
+		# Detached but not freed yet (scene swap / plugin reload) —
+		# get_tree() is null and this copy must never park a panel.
+		return
 	var surface := SceneDrop.find_3d_surface()
 	if surface == null:
+		return
+	var root := EditorInterface.get_edited_scene_root()
+	var foreign: Control = null
+	# Candidates: group members (a rename-proof identity), name matches,
+	# and structurally matching strays in the live surface — a
+	# duplicate that collides on add_child loses the panel name
+	# entirely ("@PanelContainer@<id>") yet still carries the
+	# Margin/VBox/SkyCheck subtree.
+	var cands: Array = surface.get_children().duplicate()
+	for g in get_tree().get_nodes_in_group(PANEL_GROUP):
+		if g not in cands:
+			cands.append(g)
+	for p in get_tree().root.find_children(
+			"*" + PANEL_NAME + "*", "Control", true, false):
+		if p not in cands:
+			cands.append(p)
+	for p in cands:
+		if p == _editor_panel:
+			p.set_meta(&"a2g_owner", self)
+			p.add_to_group(PANEL_GROUP)
+			continue
+		# Variant, not Object: a freed ref fails typed assignment.
+		# And no default on get_meta — it errors on missing keys anyway.
+		var owner: Variant = p.get_meta(&"a2g_owner") \
+				if p.has_meta(&"a2g_owner") else null
+		var is_panel: bool = owner != null or p.is_in_group(PANEL_GROUP) \
+				or str(p.name).contains(PANEL_NAME) \
+				or p.get_node_or_null(^"Margin/VBox/SkyCheck") != null
+		if not is_panel:
+			continue
+		if owner == self:
+			if is_instance_valid(_editor_panel):
+				_editor_panel.queue_free()  # only one may own the slot
+			_editor_panel = p  # re-adopt it after the member got lost
+			p.add_to_group(PANEL_GROUP)
+		elif is_instance_valid(owner) and owner is Node \
+				and (owner as Node).is_inside_tree() \
+				and not (self == root and owner != root):
+			foreign = p
+		else:
+			# No meta, a freed owner, or a detached-but-alive orphan:
+			# an out-of-tree owner can't drive its exports anyway.
+			p.queue_free()
+	if foreign != null:
+		if is_instance_valid(_editor_panel):
+			_editor_panel.queue_free()
+		_editor_panel = null
 		return
 	if not is_instance_valid(_editor_panel):
 		_editor_panel = $PreviewUI/Panel.duplicate()
 		_editor_panel.name = PANEL_NAME
+		_editor_panel.set_meta(&"a2g_owner", self)
+		_editor_panel.add_to_group(PANEL_GROUP)
 		_wire_ui(_editor_panel.get_node(^"Margin/VBox"))
-	# A stale panel from a previous instance (scene/script reload) —
-	# its signals point at a freed scene, last attacher wins.
-	for c in surface.get_children():
-		if c is Control and c.name == PANEL_NAME and c != _editor_panel:
-			c.queue_free()
+	_sync_controls(_editor_panel.get_node(^"Margin/VBox"))
 	if _editor_panel.get_parent() != surface:
 		if _editor_panel.get_parent() != null:
 			_editor_panel.reparent(surface)
@@ -151,6 +217,41 @@ func _bind_slider(s: HSlider, val: Label, apply: Callable) -> void:
 		func(v: float) -> void:
 			apply.call(v)
 			val.text = "×%.2f" % v)
+
+
+## Push the live exports into a control tree — without this, a
+## recreated panel (or an inspector edit while the panel is parked)
+## leaves checkboxes showing the .tscn's default "pressed" instead of
+## the real state. Only diverged controls are written so a mid-click
+## press is never disturbed.
+func _sync_controls(vb: VBoxContainer) -> void:
+	_sync_check(vb.get_node(^"SkyCheck"), activate_sky)
+	_sync_check(vb.get_node(^"ZoneGrid/ZnRefs"), show_references)
+	_sync_check(vb.get_node(^"ZoneGrid/ZnTargets"), show_targets)
+	_sync_check(vb.get_node(^"ZoneGrid/ZnScale"), show_scale)
+	_sync_check(vb.get_node(^"ZoneGrid/ZnStages"), show_stages)
+	var sky: HSlider = vb.get_node(^"SkyRow/SkySlider")
+	if not is_equal_approx(sky.value, sky_energy):
+		sky.set_value_no_signal(sky_energy)
+		vb.get_node(^"SkyRow/SkyVal").text = "×%.2f" % sky_energy
+	var uv: HSlider = vb.get_node(^"UvRow/UvSlider")
+	if not is_equal_approx(uv.value, ground_tiling):
+		uv.set_value_no_signal(ground_tiling)
+		vb.get_node(^"UvRow/UvVal").text = "×%.2f" % ground_tiling
+
+
+func _sync_check(c: CheckBox, on: bool) -> void:
+	if c.button_pressed != on:
+		c.set_pressed_no_signal(on)
+
+
+## Both surfaces — the runtime overlay and the parked editor twin.
+func _resync_controls() -> void:
+	var vb := get_node_or_null(^"PreviewUI/Panel/Margin/VBox") as VBoxContainer
+	if vb != null:
+		_sync_controls(vb)
+	if is_instance_valid(_editor_panel):
+		_sync_controls(_editor_panel.get_node(^"Margin/VBox"))
 
 
 func _apply_sky() -> void:
@@ -226,10 +327,7 @@ func _autoplace() -> void:
 			sky.sky_material = sm
 			$WorldEnvironment.environment.sky = sky
 			activate_sky = true
-			var check := get_node_or_null(
-				^"PreviewUI/Panel/Margin/VBox/SkyCheck")
-			if check != null:
-				check.set_pressed_no_signal(true)
+			_resync_controls()
 	_center_model(d["models"])
 
 
