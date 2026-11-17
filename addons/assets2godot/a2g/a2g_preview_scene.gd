@@ -201,13 +201,25 @@ func _wire_ui(vb: VBoxContainer) -> void:
 		vb.get_node("UvRow/UvVal"),
 		func(v: float) -> void: ground_tiling = v)
 	vb.get_node("ZoneGrid/ZnRefs").toggled.connect(
-		func(on: bool) -> void: show_references = on)
+		func(on: bool) -> void:
+			show_references = on
+			if on:
+				_focus_zone([$References]))
 	vb.get_node("ZoneGrid/ZnTargets").toggled.connect(
-		func(on: bool) -> void: show_targets = on)
+		func(on: bool) -> void:
+			show_targets = on
+			if on:
+				_focus_zone([$DropTargets]))
 	vb.get_node("ZoneGrid/ZnScale").toggled.connect(
-		func(on: bool) -> void: show_scale = on)
+		func(on: bool) -> void:
+			show_scale = on
+			if on:
+				_focus_zone([$ScaleRow]))
 	vb.get_node("ZoneGrid/ZnStages").toggled.connect(
-		func(on: bool) -> void: show_stages = on)
+		func(on: bool) -> void:
+			show_stages = on
+			if on:
+				_focus_zone([$PolyhavenStage, $AmbientcgStage]))
 	vb.get_node("BtnRow/BtnAutoplace").pressed.connect(_autoplace)
 	vb.get_node("BtnRow/BtnScatter").pressed.connect(_random_place)
 
@@ -217,6 +229,58 @@ func _bind_slider(s: HSlider, val: Label, apply: Callable) -> void:
 		func(v: float) -> void:
 			apply.call(v)
 			val.text = "×%.2f" % v)
+
+
+## Checkbox ON → frames the zone's visible bounds: keep the current
+## view direction, pull the camera to fit — the editor "Focus" feel.
+## In the editor this moves the viewport's editor camera; in the game
+## it moves the scene's Camera3D.
+func _focus_zone(nodes: Array) -> void:
+	var aabb := AABB()
+	var first := true
+	for n in nodes:
+		var b: Variant = _zone_aabb(n)
+		if b != null:
+			aabb = b if first else aabb.merge(b)
+			first = false
+	if first:
+		return
+	var cam := _focus_cam()
+	if cam == null:
+		return
+	var center := aabb.get_center()
+	var radius := maxf(0.5, aabb.size.length() * 0.5)
+	var dist := radius / tan(deg_to_rad(cam.fov) * 0.5) * 1.15
+	var dir := -cam.global_transform.basis.z.normalized()
+	cam.global_position = center - dir * dist
+	cam.look_at(center, Vector3.UP)
+
+
+## The camera a zone toggle should move — viewport editor camera in
+## the editor, the scene camera when running.
+func _focus_cam() -> Camera3D:
+	if Engine.is_editor_hint():
+		var vp := EditorInterface.get_editor_viewport_3d(0)
+		if vp != null:
+			return vp.get_camera_3d()
+		return null
+	return $Camera3D
+
+
+## Merged global AABB of the node's visible visuals — null when the
+## node holds nothing worth framing.
+func _zone_aabb(n: Node) -> Variant:
+	var aabb := AABB()
+	var first := true
+	var stack: Array = [n]
+	while not stack.is_empty():
+		var c: Node = stack.pop_back()
+		if c is VisualInstance3D and c.is_visible_in_tree():
+			var b: AABB = c.global_transform * c.get_aabb()
+			aabb = b if first else aabb.merge(b)
+			first = false
+		stack.append_array(c.get_children())
+	return null if first else aabb
 
 
 ## Push the live exports into a control tree — without this, a
