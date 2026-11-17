@@ -5,7 +5,7 @@ extends Node3D
 ## res://Assets2Godot/ parent (polyhaven/, ambientcg/, bk_assets/…).
 ## Each type dir gets a column (wrapping every WRAP_AT) showing the
 ## ASSET ITSELF, never a thumbnail: scene instance > .tres/mesh >
-## HDRI→sky+chrome ball > assembled PBR material ball > honest label.
+## HDRI→unshaded panorama ball > assembled PBR material ball > label.
 ## Downloads may sit unimported or .gdignored (the GUI bulk-import
 ## crash surface — see AGENTS.md), so every read is dual-path:
 ## load() when ResourceLoader exists, else raw GLTFDocument/Image.load.
@@ -73,6 +73,26 @@ func _populate() -> void:
 		_place_type(base.path_join(type_dir),
 			Vector3(float(i % WRAP_AT) * DX, 0, float(i / WRAP_AT) * DZ))
 		i += 1
+	_plate(i)
+
+
+## A faint slab under the populated columns — the grid reads as one
+## unit instead of objects scattered on open ground.
+func _plate(count: int) -> void:
+	if count == 0:
+		return
+	var cols: int = mini(count, WRAP_AT)
+	var rows: int = (count - 1) / WRAP_AT + 1
+	var bm := BoxMesh.new()
+	bm.size = Vector3(cols * DX + 1.0, 0.04, rows * DZ + 1.0)
+	var p := MeshInstance3D.new()
+	p.mesh = bm
+	p.position = Vector3((cols - 1) * DX * 0.5, 0.02,
+		(rows - 1) * DZ * 0.5)
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.3, 0.3, 0.3)
+	p.material_override = m
+	add_child(p)
 
 func _place_type(dir: String, pos: Vector3) -> void:
 	var type_name := dir.get_file()
@@ -91,12 +111,11 @@ func _place_type(dir: String, pos: Vector3) -> void:
 			if res is Material:
 				_show_material(res, pos)
 				return
-	for f in files: # HDR/EXR beats preview jpgs: feed sky + chrome ball
+	for f in files: # HDR/EXR beats preview jpgs: show the panorama
 		if f.get_extension() in SKY_EXTS and "hdri" in type_name.to_lower():
 			var tex := _load_tex(f)
 			if tex:
-				_feed_sky(tex)
-				_show_chrome(pos)
+				_show_pano(tex, pos)
 				return
 	var mat := _assemble_material(files)
 	if mat != null:
@@ -209,44 +228,16 @@ func _show_material(mat: Material, pos: Vector3) -> void:
 	ball.position = pos + Vector3(0, 0.5, 0)
 	add_child(ball)
 
-## A chrome ball under an HDRI dir: proves the sky feeds reflections.
-func _show_chrome(pos: Vector3) -> void:
+## An unshaded panorama ball under an HDRI dir — proves the file
+## decodes and shows its look WITHOUT hijacking the stage's neutral
+## sky (the chrome ball in the references row stays on neutral light;
+## a downloaded HDRI goes live through an explicit drop, not by
+## existing on disk).
+func _show_pano(tex: Texture2D, pos: Vector3) -> void:
 	var mat := StandardMaterial3D.new()
-	mat.metallic = 1.0
-	mat.roughness = 0.05
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_texture = tex
 	_show_material(mat, pos)
-
-## A real downloaded HDRI as the sky — proves the file loads and
-## lights. Scoped to the nearest ancestor that carries a
-## WorldEnvironment: inside the preview instance that's the preview's
-## own env, never the edited scene's.
-func _feed_sky(tex: Texture2D) -> void:
-	if tex == null:
-		return
-	var env := _stage_world_env()
-	if env == null or env.environment == null:
-		return
-	var cur := env.environment.sky
-	if cur != null and cur.sky_material is PanoramaSkyMaterial \
-			and cur.sky_material.panorama == tex:
-		return
-	var sky_mat := PanoramaSkyMaterial.new()
-	sky_mat.panorama = tex
-	var sky := Sky.new()
-	sky.sky_material = sky_mat
-	env.environment.sky = sky
-	env.environment.background_mode = Environment.BG_SKY
-
-## Walks ancestors outward — the first subtree with a
-## WorldEnvironment is this stage's own sky host.
-func _stage_world_env() -> WorldEnvironment:
-	var n: Node = self
-	while n != null:
-		var we := n.find_child("WorldEnvironment", true, false) as WorldEnvironment
-		if we != null:
-			return we
-		n = n.get_parent()
-	return null
 
 func _label(text: String, pos: Vector3) -> void:
 	var l := Label3D.new()
