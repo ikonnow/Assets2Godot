@@ -18,11 +18,11 @@ extends Node3D
 	set(v):
 		sky_energy = v
 		_apply_sky()
-## UV1 scale on the ground plane's material — a dropped .tres is
+## Texture repeat on the ground plane's material — a dropped .tres is
 ## duplicated first so the on-disk resource keeps its own scale.
-@export_range(0.25, 8.0, 0.25) var ground_uv := 1.0:
+@export_range(0.25, 8.0, 0.25) var ground_tiling := 1.0:
 	set(v):
-		ground_uv = v
+		ground_tiling = v
 		_apply_tiling()
 
 @export_group("Zones")
@@ -44,8 +44,10 @@ extends Node3D
 		_apply_zones()
 
 @export_group("Downloads")
-@export_tool_button("Autoplace downloads") var autoplace := _autoplace
-@export_tool_button("Random place") var random_place := _random_place
+@export_tool_button("Autoplace A2G assets") var autoplace := _autoplace
+@export_tool_button("Scatter A2G assets") var scatter := _random_place
+
+const SceneDrop := preload("res://addons/assets2godot/a2g/a2g_scene_drop.gd")
 
 const PROVIDER_ROOTS := [
 	"res://Assets2Godot/polyhaven",
@@ -57,24 +59,74 @@ const GLTF_EXTS := ["gltf", "glb"]
 const SKY_EXTS := ["hdr", "exr"]
 const SCAN_DEPTH := 4
 const SCATTER_COUNT := 3
+const PANEL_NAME := "A2GPreviewPanel"
+## The editor rebuilds the viewport's input surface at its own pace —
+## the panel re-attaches on this cadence, same rule as the drop overlay.
+const HOST_RECHECK := 45
 
 ## The duplicate parked on the ground so UV edits never touch the
 ## shared or freshly dropped resource.
 var _ground_dup: StandardMaterial3D
+## Editor-side copy of the overlay, parked inside the 3D viewport's
+## input surface — ownerless, so it never enters the edited scene.
+var _editor_panel: Control
+var _host_tick := 0
 
 
 func _ready() -> void:
 	_apply_sky()
 	_apply_tiling()
 	_apply_zones()
+	_style_zone_labels()
 	if Engine.is_editor_hint():
 		$PreviewUI.hide()
+		set_process(true)
+		call_deferred("_attach_editor_panel")
 		return
-	_wire_ui()
+	_wire_ui($PreviewUI/Panel/Margin/VBox)
 
 
-func _wire_ui() -> void:
-	var vb := $PreviewUI/Panel/Margin/VBox
+func _process(_dt: float) -> void:
+	# Editor-only (process is off in the game): keep the panel parked
+	# inside the live viewport surface, rebuilt by the editor anytime.
+	_host_tick += 1
+	if _host_tick >= HOST_RECHECK:
+		_host_tick = 0
+		_attach_editor_panel()
+
+
+func _exit_tree() -> void:
+	if is_instance_valid(_editor_panel):
+		_editor_panel.queue_free()
+
+
+## Editor twin of the runtime overlay — a duplicate of the same panel,
+## so both surfaces share one layout and one wiring. The viewport's
+## input surface is where Control children actually receive input in an
+## edited scene (the drop overlay lives there too); parking the panel
+## inside the scene itself would render it unclickable.
+func _attach_editor_panel() -> void:
+	var surface := SceneDrop.find_3d_surface()
+	if surface == null:
+		return
+	if not is_instance_valid(_editor_panel):
+		_editor_panel = $PreviewUI/Panel.duplicate()
+		_editor_panel.name = PANEL_NAME
+		_wire_ui(_editor_panel.get_node(^"Margin/VBox"))
+	# A stale panel from a previous instance (scene/script reload) —
+	# its signals point at a freed scene, last attacher wins.
+	for c in surface.get_children():
+		if c is Control and c.name == PANEL_NAME and c != _editor_panel:
+			c.queue_free()
+	if _editor_panel.get_parent() != surface:
+		if _editor_panel.get_parent() != null:
+			_editor_panel.reparent(surface)
+		else:
+			surface.add_child(_editor_panel)
+		_editor_panel.position = Vector2(12, 12)
+
+
+func _wire_ui(vb: VBoxContainer) -> void:
 	vb.get_node("SkyCheck").toggled.connect(
 		func(on: bool) -> void: activate_sky = on)
 	_bind_slider(vb.get_node("SkyRow/SkySlider"),
@@ -82,7 +134,7 @@ func _wire_ui() -> void:
 		func(v: float) -> void: sky_energy = v)
 	_bind_slider(vb.get_node("UvRow/UvSlider"),
 		vb.get_node("UvRow/UvVal"),
-		func(v: float) -> void: ground_uv = v)
+		func(v: float) -> void: ground_tiling = v)
 	vb.get_node("ZoneGrid/ZnRefs").toggled.connect(
 		func(on: bool) -> void: show_references = on)
 	vb.get_node("ZoneGrid/ZnTargets").toggled.connect(
@@ -92,7 +144,7 @@ func _wire_ui() -> void:
 	vb.get_node("ZoneGrid/ZnStages").toggled.connect(
 		func(on: bool) -> void: show_stages = on)
 	vb.get_node("BtnRow/BtnAutoplace").pressed.connect(_autoplace)
-	vb.get_node("BtnRow/BtnRandom").pressed.connect(_random_place)
+	vb.get_node("BtnRow/BtnScatter").pressed.connect(_random_place)
 
 
 func _bind_slider(s: HSlider, val: Label, apply: Callable) -> void:
@@ -136,7 +188,17 @@ func _apply_tiling() -> void:
 		mat = mat.duplicate()
 		mi.set_surface_override_material(0, mat)
 		_ground_dup = mat
-	mat.uv1_scale = Vector3(ground_uv, ground_uv, ground_uv)
+	mat.uv1_scale = Vector3(ground_tiling, ground_tiling, ground_tiling)
+
+
+## White text over a faint dark halo — the same read as the
+## "DOWNLOADING A2G" status (white caps, shadow at 0.3 alpha), not a
+## hard black outline.
+func _style_zone_labels() -> void:
+	for l in find_children("*", "Label3D", true, false):
+		l.modulate = Color.WHITE
+		l.outline_size = 10
+		l.outline_modulate = Color(0.0, 0.0, 0.0, 0.3)
 
 
 # MARK: downloads → stage
@@ -279,7 +341,7 @@ func _scan_dir(dir: String, out: Dictionary, depth: int) -> void:
 		if ext == "tres":
 			if _tres_is_material(path):
 				out["materials"].append(path)
-		elif ext in SKY_EXTS:
+		elif ext in SKY_EXTS and _is_sky_path(dir):
 			out["hdris"].append(path)
 		elif ext in SCENE_EXTS:
 			out["models"].append(path)
@@ -287,6 +349,16 @@ func _scan_dir(dir: String, out: Dictionary, depth: int) -> void:
 		return
 	for s in DirAccess.get_directories_at(dir):
 		_scan_dir(dir.path_join(s), out, depth - 1)
+
+
+## .hdr/.exr only counts as a sky HDRI under an hdri* type dir — the
+## same extensions carry normal maps and terrain heightmaps in the
+## materials/terrains trees, which must not reach the sky.
+func _is_sky_path(dir: String) -> bool:
+	for seg in dir.split("/"):
+		if seg.begins_with("hdri"):
+			return true
+	return false
 
 
 ## Header + ext_resource sniff instead of load(): a .tres whose maps
@@ -305,13 +377,53 @@ func _tres_is_material(path: String) -> bool:
 		if l.begins_with("[resource") or l.begins_with("[sub_resource"):
 			break
 	var t := _attr(head.get_slice("\n", 0), "type")
-	if not t.ends_with("Material") or t.ends_with("SkyMaterial"):
+	# Mesh-usable types: *Material AND *Material3D — StandardMaterial3D /
+	# ORMMaterial3D end on "3D", not "Material". *SkyMaterial stays out.
+	if not (t.ends_with("Material") or t.ends_with("Material3D")) \
+			or t.ends_with("SkyMaterial"):
 		return false
 	for l in head.split("\n"):
 		if l.begins_with("[ext_resource"):
 			var p := _attr(l, "path")
-			if p != "" and not ResourceLoader.exists(p):
+			if p == "":
+				continue
+			# Provider materials reference their maps relative to the
+			# .tres ("./textures_2K/x.jpg") — ResourceLoader only takes
+			# res://, user:// or absolute OS paths, so resolve first.
+			if not p.begins_with("res://") and not p.begins_with("user://") \
+					and not p.is_absolute_path():
+				p = path.get_base_dir().path_join(p).simplify_path()
+			if not ResourceLoader.exists(p) or not _map_loadable(p):
 				return false
+	return true
+
+
+## A map can pass ResourceLoader.exists (a stale .import claims
+## Texture2D) yet fail to decode — BlendKit ships JPEG/PNG payloads
+## under .exr names. The declared extension's magic bytes decide
+## cheaply; unknown extensions skip the check.
+const _MAGIC := {
+	"exr": [0x76, 0x2f, 0x31, 0x01],
+	"png": [0x89, 0x50, 0x4e, 0x47],
+	"jpg": [0xff, 0xd8],
+	"jpeg": [0xff, 0xd8],
+	"hdr": [0x23],
+}
+
+
+func _map_loadable(path: String) -> bool:
+	var magic: Array = _MAGIC.get(path.get_extension().to_lower(), [])
+	if magic.is_empty():
+		return true
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return false
+	var head := f.get_buffer(magic.size())
+	if head.size() < magic.size():
+		return false
+	for i in magic.size():
+		if head[i] != magic[i]:
+			return false
 	return true
 
 

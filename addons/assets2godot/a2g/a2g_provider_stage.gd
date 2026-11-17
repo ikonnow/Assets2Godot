@@ -244,4 +244,9 @@ func _label(text: String, pos: Vector3) -> void:
 	l.text = text
 	l.position = pos
 	l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	# Same read as the zone titles / the "DOWNLOADING A2G" status:
+	# white text over a faint dark halo, no hard outline.
+	l.modulate = Color.WHITE
+	l.outline_size = 8
+	l.outline_modulate = Color(0.0, 0.0, 0.0, 0.3)
 	add_child(l)

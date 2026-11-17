@@ -122,9 +122,9 @@ surface_material_override/0 = SubResource("StandardMaterial3D_pad")
 transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, -2, 3, -8)
 billboard = 1
 modulate = Color(1, 1, 1, 1)
-outline_modulate = Color(0, 0, 0, 0.4)
+outline_modulate = Color(0, 0, 0, 0.3)
 font_size = 48
-outline_size = 8
+outline_size = 10
 text = "D R O P   T A R G E T S"
 
 [node name="Wall" type="MeshInstance3D" parent="DropTargets"]
@@ -158,9 +158,9 @@ surface_material_override/0 = SubResource("StandardMaterial3D_neutral")
 transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 1.8, 7)
 billboard = 1
 modulate = Color(1, 1, 1, 1)
-outline_modulate = Color(0, 0, 0, 0.4)
+outline_modulate = Color(0, 0, 0, 0.3)
 font_size = 48
-outline_size = 8
+outline_size = 10
 text = "R E F E R E N C E S"
 
 [node name="ChromeBall" type="MeshInstance3D" parent="References"]
@@ -214,9 +214,9 @@ surface_material_override/0 = SubResource("StandardMaterial3D_blue")
 transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 12.5, 3, 5)
 billboard = 1
 modulate = Color(1, 1, 1, 1)
-outline_modulate = Color(0, 0, 0, 0.4)
+outline_modulate = Color(0, 0, 0, 0.3)
 font_size = 48
-outline_size = 8
+outline_size = 10
 text = "S C A L E"
 
 [node name="Cube025" type="MeshInstance3D" parent="ScaleRow"]
@@ -248,9 +248,9 @@ surface_material_override/0 = SubResource("StandardMaterial3D_neutral")
 transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, -14, 3.5, -11)
 billboard = 1
 modulate = Color(1, 1, 1, 1)
-outline_modulate = Color(0, 0, 0, 0.4)
+outline_modulate = Color(0, 0, 0, 0.3)
 font_size = 48
-outline_size = 8
+outline_size = 10
 text = "P R O V I D E R   S T A G E S"
 
 [node name="PolyhavenStage" parent="." instance=ExtResource("1")]
@@ -287,6 +287,7 @@ text = "A2G Preview"
 
 [node name="SkyCheck" type="CheckBox" parent="PreviewUI/Panel/Margin/VBox"]
 button_pressed = true
+tooltip_text = "Sky backdrop on/off. Ambient light + reflections stay sky-sourced — use it to judge a dropped HDRI's light without the panorama."
 text = "Activate sky"
 
 [node name="SkyRow" type="HBoxContainer" parent="PreviewUI/Panel/Margin/VBox"]
@@ -295,6 +296,7 @@ text = "Activate sky"
 text = "Sky energy"
 
 [node name="SkySlider" type="HSlider" parent="PreviewUI/Panel/Margin/VBox/SkyRow"]
+tooltip_text = "Scales the sky's brightness — backdrop and sky-sourced ambient light / reflections together."
 custom_minimum_size = Vector2(90, 0)
 size_flags_horizontal = 3
 max_value = 2.0
@@ -308,9 +310,11 @@ text = "×1.00"
 [node name="UvRow" type="HBoxContainer" parent="PreviewUI/Panel/Margin/VBox"]
 
 [node name="LblU" type="Label" parent="PreviewUI/Panel/Margin/VBox/UvRow"]
-text = "Ground UV"
+tooltip_text = "How often the ground material repeats across the plane. A dropped .tres is duplicated first — the file on disk never changes."
+text = "Ground tiling"
 
 [node name="UvSlider" type="HSlider" parent="PreviewUI/Panel/Margin/VBox/UvRow"]
+tooltip_text = "How often the ground material repeats across the plane. A dropped .tres is duplicated first — the file on disk never changes."
 custom_minimum_size = Vector2(90, 0)
 size_flags_horizontal = 3
 min_value = 0.25
@@ -325,26 +329,30 @@ text = "×1.00"
 [node name="Sep2" type="HSeparator" parent="PreviewUI/Panel/Margin/VBox"]
 
 [node name="LblZones" type="Label" parent="PreviewUI/Panel/Margin/VBox"]
-text = "Zones"
+text = "Show zones"
 
 [node name="ZoneGrid" type="GridContainer" parent="PreviewUI/Panel/Margin/VBox"]
 columns = 2
 
 [node name="ZnRefs" type="CheckBox" parent="PreviewUI/Panel/Margin/VBox/ZoneGrid"]
 button_pressed = true
-text = "References"
+tooltip_text = "Lookdev references — chrome, 18% gray, roughness ramp, RGB primaries."
+text = "Reference spheres"
 
 [node name="ZnTargets" type="CheckBox" parent="PreviewUI/Panel/Margin/VBox/ZoneGrid"]
 button_pressed = true
-text = "Targets"
+tooltip_text = "Material test surfaces — wall, ramp, cylinder, column, large sphere."
+text = "Drop targets"
 
 [node name="ZnScale" type="CheckBox" parent="PreviewUI/Panel/Margin/VBox/ZoneGrid"]
 button_pressed = true
-text = "Scale"
+tooltip_text = "0.25–4 m cubes for judging asset dimensions."
+text = "Scale cubes"
 
 [node name="ZnStages" type="CheckBox" parent="PreviewUI/Panel/Margin/VBox/ZoneGrid"]
 button_pressed = true
-text = "Stages"
+tooltip_text = "One live example per downloaded asset type, per provider."
+text = "Provider stages"
 
 [node name="Sep3" type="HSeparator" parent="PreviewUI/Panel/Margin/VBox"]
 
@@ -353,8 +361,10 @@ theme_override_constants/separation = 8
 
 [node name="BtnAutoplace" type="Button" parent="PreviewUI/Panel/Margin/VBox/BtnRow"]
 size_flags_horizontal = 3
-text = "Autoplace"
+tooltip_text = "Random downloaded material on each drop target, a downloaded HDRI into the sky, one model centered on the pad."
+text = "Autoplace A2G"
 
-[node name="BtnRandom" type="Button" parent="PreviewUI/Panel/Margin/VBox/BtnRow"]
+[node name="BtnScatter" type="Button" parent="PreviewUI/Panel/Margin/VBox/BtnRow"]
 size_flags_horizontal = 3
-text = "Random place"
+tooltip_text = "Up to 3 random downloaded models scattered on the drop pad — re-press replaces them."
+text = "Scatter A2G"
