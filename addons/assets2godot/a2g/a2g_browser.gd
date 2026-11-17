@@ -443,9 +443,17 @@ var _provider_roots := {}
 func _fetch(endpoint: String, cb: Callable) -> void:
 	var req := HTTPRequest.new()
 	(plugin if plugin != null else self).add_child(req)
+	# Teardown frees the request while the signal is still queued —
+	# a dead req capture would log "lambda capture freed".
+	var rw := weakref(req)
 	req.request_completed.connect(func(_result, code, _h, body):
-		req.queue_free()
-		cb.call(JSON.parse_string(body.get_string_from_utf8()) if code == 200 else null))
+		var r = rw.get_ref()
+		if r == null:
+			return
+		r.queue_free()
+		# cb's target may be gone by now — the request outlives panes.
+		if cb.is_valid():
+			cb.call(JSON.parse_string(body.get_string_from_utf8()) if code == 200 else null))
 	var url: String = plugin.connection.client_url(endpoint)
 	if req.request(url) != OK:
 		req.queue_free()

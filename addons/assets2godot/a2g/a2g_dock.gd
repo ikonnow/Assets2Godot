@@ -221,10 +221,18 @@ func _post(endpoint: String, body: Dictionary, cb: Callable) -> void:
 func _request(endpoint: String, method: int, body, cb: Callable) -> void:
 	var req := HTTPRequest.new()
 	(plugin if plugin != null else self).add_child(req)
+	# Teardown frees the request while the signal is still queued —
+	# a dead req capture would log "lambda capture freed".
+	var rw := weakref(req)
 	req.request_completed.connect(func(_result, code, _h, resp_body):
-		req.queue_free()
+		var r = rw.get_ref()
+		if r == null:
+			return
+		r.queue_free()
 		var data = JSON.parse_string(resp_body.get_string_from_utf8()) if code == 200 else null
-		cb.call(data))
+		# cb's target may be gone by now — the request outlives panes.
+		if cb.is_valid():
+			cb.call(data))
 	var url: String = plugin.connection.client_url(endpoint)
 	var err := req.request(url, ["Content-Type: application/json"], method,
 		JSON.stringify(body) if body != null else "")

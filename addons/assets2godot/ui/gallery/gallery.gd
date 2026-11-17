@@ -143,7 +143,10 @@ func _process(delta: float) -> void:
 func _notification(what: int) -> void:
 	match what:
 		NOTIFICATION_VISIBILITY_CHANGED:
-			if not plugin or not is_visible_in_tree():
+			# Fires mid-reparent too — the pane can read visible while
+			# search_edit has already left the tree (dock move).
+			if not plugin or not is_visible_in_tree() \
+					or not search_edit.is_inside_tree():
 				return
 			# Like the Asset Store, typing goes straight to the search.
 			search_edit.grab_focus()
@@ -345,7 +348,8 @@ func _on_project_toggled(pressed: bool) -> void:
 	# Shown, the project view rescans if anything changed meanwhile.
 	project_view.visible = pressed
 	_update_busy()
-	search_edit.grab_focus()
+	if search_edit.is_inside_tree():
+		search_edit.grab_focus()
 	# The scroll range follows the new content after layout.
 	var restore := _other_scroll
 	_other_scroll = scroll_position

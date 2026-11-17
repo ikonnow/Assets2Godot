@@ -290,8 +290,11 @@ func _notification(what: int) -> void:
 	match what:
 		NOTIFICATION_VISIBILITY_CHANGED:
 			# VISIBILITY_CHANGED can arrive between ENTER_TREE and _ready —
-			# _search does not exist yet then.
-			if not plugin or not is_visible_in_tree() or _search == null:
+			# _search does not exist yet then. It also fires mid-reparent
+			# (dock move) while the pane is visible but _search has
+			# already left the tree.
+			if not plugin or not is_visible_in_tree() or _search == null \
+					or not _search.is_inside_tree():
 				return
 			# Like the Asset Store / BlendKit tab, typing goes straight to
 			# the search when the tab shows.
@@ -370,11 +373,23 @@ func _fetch_url(url: String, cb: Callable, track_state := false) -> void:
 	# Off the main thread — catalog pages run to ~6MB of JSON each.
 	req.use_threads = true
 	(plugin if plugin != null else self).add_child(req)
+	# Requests outlive this pane (they hang on the plugin so reparents
+	# don't kill them) — and teardown frees the request itself while the
+	# signal is still queued. Capture both weakly, bail on either death.
+	var rw := weakref(req)
+	var wr := weakref(self)
 	req.request_completed.connect(func(_result, code, _h, body):
-		req.queue_free()
+		var r = rw.get_ref()
+		if r == null:
+			return
+		r.queue_free()
+		var o = wr.get_ref()
+		if o == null:
+			return
 		if track_state:
-			_set_catalog_state(1 if code == 200 else 2)
-		cb.call(body.get_string_from_utf8() if code == 200 else ""))
+			o._set_catalog_state(1 if code == 200 else 2)
+		if cb.is_valid():
+			cb.call(body.get_string_from_utf8() if code == 200 else ""))
 	if req.request(url, [AcgApi.UA_HEADER]) != OK:
 		req.queue_free()
 		if track_state:
@@ -737,9 +752,20 @@ func _pump_thumbs() -> void:
 		# with the 500-card rebuild for frame time.
 		req.use_threads = true
 		(plugin if plugin != null else self).add_child(req)
+		# The request hangs on the plugin and can outlive this pane —
+		# and teardown frees the request while the signal is still
+		# queued. Capture both weakly, bail on either death.
+		var rw := weakref(req)
+		var wr := weakref(self)
 		req.request_completed.connect(func(_r, code, _h, body):
-			req.queue_free()
-			_thumb_active -= 1
+			var r = rw.get_ref()
+			if r == null:
+				return
+			r.queue_free()
+			var o = wr.get_ref()
+			if o == null:
+				return
+			o._thumb_active -= 1
 			if code == 200:
 				var img := Image.new()
 				var err := img.load_webp_from_buffer(body)
@@ -749,9 +775,9 @@ func _pump_thumbs() -> void:
 					err = img.load_jpg_from_buffer(body)
 				if err == OK:
 					var tex := ImageTexture.create_from_image(img)
-					_thumb_cache[url] = tex
-					_push_thumb(slug, tex)
-			_pump_thumbs())
+					o._thumb_cache[url] = tex
+					o._push_thumb(slug, tex)
+			o._pump_thumbs())
 		if req.request(url, [AcgApi.UA_HEADER]) != OK:
 			req.queue_free()
 			_thumb_active -= 1
@@ -967,14 +993,26 @@ func _dl_send(url: String, dest: String, redirs: int) -> void:
 	_dl_req.use_threads = true
 	_dl_req.download_file = dest + ".part"
 	(plugin if plugin != null else self).add_child(_dl_req)
-	_dl_req.request_completed.connect(func(result, code, headers, _b):
-		var got := _dl_req.get_downloaded_bytes()
-		_dl_req.queue_free()
-		_dl_req = null
+	var req := _dl_req
+	# The request hangs on the plugin and can outlive this pane —
+	# and teardown frees the request while the signal is still
+	# queued. Capture both weakly, bail on either death.
+	var rw := weakref(req)
+	var wr := weakref(self)
+	req.request_completed.connect(func(result, code, headers, _b):
+		var r = rw.get_ref()
+		if r == null:
+			return
+		var got = r.get_downloaded_bytes()
+		r.queue_free()
+		var o = wr.get_ref()
+		if o == null:
+			return
+		o._dl_req = null
 		if code in [301, 302, 303, 307, 308] and redirs < MAX_REDIRECTS:
 			var loc := _header(headers, "location")
 			if not loc.is_empty():
-				_dl_send(loc, dest, redirs + 1)
+				o._dl_send(loc, dest, redirs + 1)
 				return
 		var err := ""
 		if result != HTTPRequest.RESULT_SUCCESS:
@@ -984,13 +1022,13 @@ func _dl_send(url: String, dest: String, redirs: int) -> void:
 		if err.is_empty() and DirAccess.rename_absolute(dest + ".part", dest) != OK:
 			err = "rename failed"
 		if not err.is_empty():
-			_dl_fail(dest, err)
+			o._dl_fail(dest, err)
 			return
 		if dest.get_extension().to_lower() == "zip":
-			_dl_zips.append(dest)
-		_dl_done_bytes += got
-		_dl_queue.pop_front()
-		_dl_next())
+			o._dl_zips.append(dest)
+		o._dl_done_bytes += got
+		o._dl_queue.pop_front()
+		o._dl_next())
 	# raw redirect paths carry spaces/^ — encode_url before requesting
 	if _dl_req.request(AcgApi.encode_url(url), [AcgApi.UA_HEADER]) != OK:
 		_dl_req.queue_free()
@@ -1191,9 +1229,17 @@ func _fetch_roots() -> void:
 func _fetch_client(endpoint: String, cb: Callable) -> void:
 	var req := HTTPRequest.new()
 	(plugin if plugin != null else self).add_child(req)
+	# Teardown frees the request while the signal is still queued —
+	# a dead req capture would log "lambda capture freed".
+	var rw := weakref(req)
 	req.request_completed.connect(func(_r, code, _h, body):
-		req.queue_free()
-		cb.call(JSON.parse_string(body.get_string_from_utf8()) if code == 200 else null))
+		var r = rw.get_ref()
+		if r == null:
+			return
+		r.queue_free()
+		# cb's target may be gone by now — the request outlives panes.
+		if cb.is_valid():
+			cb.call(JSON.parse_string(body.get_string_from_utf8()) if code == 200 else null))
 	if req.request(plugin.connection.client_url(endpoint)) != OK:
 		req.queue_free()
 

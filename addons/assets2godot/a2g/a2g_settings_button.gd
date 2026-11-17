@@ -263,21 +263,32 @@ func _check_updates() -> void:
 	var req := HTTPRequest.new()
 	req.timeout = 15.0
 	(plugin if plugin != null else self).add_child(req)
+	# The request hangs on the plugin and can outlive this button — and
+	# teardown frees the request while the signal is still queued.
+	# Capture both weakly, bail on either death.
+	var rw := weakref(req)
+	var wr := weakref(self)
 	req.request_completed.connect(func(_result, code, _h, body):
-		req.queue_free()
-		var releases_url: String = plugin.SOURCES_URL + "/releases"
+		var r = rw.get_ref()
+		if r == null:
+			return
+		r.queue_free()
+		var o = wr.get_ref()
+		if o == null:
+			return
+		var releases_url: String = o.plugin.SOURCES_URL + "/releases"
 		if code != 200:
-			_update = {"error": "HTTP %d" % code, "url": releases_url}
+			o._update = {"error": "HTTP %d" % code, "url": releases_url}
 		else:
 			var data: Variant = JSON.parse_string(body.get_string_from_utf8())
 			if data is Dictionary and not str(data.get("tag_name", "")).is_empty():
-				_update = {"latest": str(data["tag_name"]),
+				o._update = {"latest": str(data["tag_name"]),
 					"url": str(data.get("html_url", releases_url))}
 			else:
-				_update = {"error": "no release found", "url": releases_url}
-		if _menu.visible:
-			_fill_menu()
-			_menu.reset_size())
+				o._update = {"error": "no release found", "url": releases_url}
+		if o._menu.visible:
+			o._fill_menu()
+			o._menu.reset_size())
 	req.request(RELEASES_API,
 		["Accept: application/vnd.github+json",
 			"User-Agent: Assets2Godot/%s (Godot editor plugin)" % plugin.get_addon_version()])

@@ -290,10 +290,22 @@ func _fetch_preview(slug: String) -> void:
 	_req = HTTPRequest.new()
 	_req.timeout = 30.0
 	get_tree().root.add_child(_req)
-	_req.request_completed.connect(func(_r, code, _h, body):
-		_req.queue_free()
-		_req = null
-		if code != 200 or str(asset.get("slug", "")) != slug:
+	var req := _req
+	# The request hangs on the root and outlives this dialog — and
+	# teardown frees the request while the signal is still queued.
+	# Capture both weakly, bail on either death.
+	var rw := weakref(req)
+	var wr := weakref(self)
+	req.request_completed.connect(func(_r, code, _h, body):
+		var r = rw.get_ref()
+		if r == null:
+			return
+		r.queue_free()
+		var o = wr.get_ref()
+		if o == null:
+			return
+		o._req = null
+		if code != 200 or str(o.asset.get("slug", "")) != slug:
 			return
 		var img := Image.new()
 		var err := img.load_png_from_buffer(body)
@@ -302,12 +314,12 @@ func _fetch_preview(slug: String) -> void:
 		if err != OK:
 			err = img.load_jpg_from_buffer(body)
 		if err == OK:
-			_textures["primary"] = ImageTexture.create_from_image(img)
+			o._textures["primary"] = ImageTexture.create_from_image(img)
 			# The thumb was only a placeholder while the render streamed in —
 			# once the better one exists it's the only frame the dialog shows.
-			_textures.erase("thumb")
-			_set_frame("primary")
-			_rebuild_strip())
+			o._textures.erase("thumb")
+			o._set_frame("primary")
+			o._rebuild_strip())
 	if _req.request(PhApi.preview_url(slug, 2048), [PhApi.UA_HEADER]) != OK:
 		_req.queue_free()
 		_req = null

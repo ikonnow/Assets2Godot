@@ -26,6 +26,7 @@ signal failed(payload: Variant, path: String)
 const DEFAULT_SIZE := 256
 const SETTING_SIZE := "assets2godot/thumb_size"
 const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
+const Conversions = preload("res://addons/assets2godot/conversions.gd")
 const PER_FRAME := 1
 const CACHE_MAX := 256
 const CACHE_DIR := "a2g/thumbs"
@@ -152,24 +153,55 @@ func _sync_size() -> void:
 ## and logs "will not work on export" for EVERY decode — a full-grid
 ## refill floods + redraws the console. Buffer decode sidesteps it.
 func _decode_image(path: String) -> Image:
-	var ext := path.get_extension().to_lower()
 	var bytes := FileAccess.get_file_as_bytes(path)
 	if bytes.is_empty():
 		return null
 	var img := Image.new()
 	var err := OK
-	match ext:
+	# The payload decides, not the suffix — provider files can carry the
+	# wrong extension (BlendKit ships JPEG bytes under .exr names). Only
+	# formats without magic (tga) and text (svg) fall back to it.
+	var fmt := _sniff(bytes)
+	if fmt == "":
+		fmt = path.get_extension().to_lower()
+	match fmt:
 		"png": err = img.load_png_from_buffer(bytes)
 		"jpg", "jpeg": err = img.load_jpg_from_buffer(bytes)
 		"webp": err = img.load_webp_from_buffer(bytes)
 		"tga": err = img.load_tga_from_buffer(bytes)
 		"bmp": err = img.load_bmp_from_buffer(bytes)
-		"exr": err = img.load_exr_from_buffer(bytes)
+		"exr":
+			# Header peek first — tinyexr errors on non-EXR payloads,
+			# multi-part files and the compressions it can't read
+			# (BlendKit's DWAA), once per grid refill each.
+			var hdr := Conversions.exr_header(path)
+			if hdr.get("compression", -1) not in Conversions.EXR_READABLE_COMPRESSIONS:
+				return null
+			err = img.load_exr_from_buffer(bytes)
 		# SVGs rasterize tiny by default — bump the scale so they
 		# survive at card size.
 		"svg": err = img.load_svg_from_buffer(bytes, 4.0)
 		_: return null
 	return img if err == OK else null
+
+
+## The payload's real format from its magic bytes, "" when nothing
+## matches — Radiance .hdr and .tga have none, .svg is text.
+static func _sniff(bytes: PackedByteArray) -> String:
+	if bytes.size() < 4:
+		return ""
+	if bytes[0] == 0x89 and bytes[1] == 0x50 and bytes[2] == 0x4E and bytes[3] == 0x47:
+		return "png"
+	if bytes[0] == 0xFF and bytes[1] == 0xD8:
+		return "jpg"
+	if bytes[0] == 0x76 and bytes[1] == 0x2F and bytes[2] == 0x31 and bytes[3] == 0x01:
+		return "exr"
+	if bytes[0] == 0x42 and bytes[1] == 0x4D:
+		return "bmp"
+	if bytes.size() >= 12 and bytes.slice(0, 4).get_string_from_ascii() == "RIFF" \
+			and bytes.slice(8, 12).get_string_from_ascii() == "WEBP":
+		return "webp"
+	return ""
 
 
 ## Staged renders: loads the file, stages a Node3D, renders one frame in

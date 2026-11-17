@@ -148,10 +148,14 @@ static func _card_drag_data(_at: Vector2, item: Control) -> Variant:
 		data = payload.duplicate()
 	if data == null:
 		return null
-	var preview := Label.new()
-	preview.text = str(payload.get("remote_title",
-		asset.get("displayName", path.get_file())))
-	item.set_drag_preview(preview)
+	# set_drag_preview is only legal mid-drag — probes and anything
+	# calling the forwarding callable outside a real drag get the
+	# payload without the preview.
+	if item.get_viewport() != null and item.get_viewport().gui_is_dragging():
+		var preview := Label.new()
+		preview.text = str(payload.get("remote_title",
+			asset.get("displayName", path.get_file())))
+		item.set_drag_preview(preview)
 	return data
 
 

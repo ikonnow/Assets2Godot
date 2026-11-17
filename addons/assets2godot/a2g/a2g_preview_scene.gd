@@ -209,43 +209,51 @@ func _attach_editor_panel() -> void:
 
 
 func _wire_ui(vb: VBoxContainer) -> void:
+	# Orphaned panels keep these connections — without a weak owner a
+	# dead capture logs "lambda capture freed" on every emit.
+	var wr := weakref(self)
 	vb.get_node("SkyCheck").toggled.connect(
-		func(on: bool) -> void: activate_sky = on)
+		func(on: bool) -> void:
+			var o = wr.get_ref()
+			if o != null:
+				o.activate_sky = on)
 	_bind_slider(vb.get_node("SkyRow/SkySlider"),
-		vb.get_node("SkyRow/SkyVal"),
-		func(v: float) -> void: sky_energy = v)
+		vb.get_node("SkyRow/SkyVal"), wr, &"sky_energy")
 	_bind_slider(vb.get_node("UvRow/UvSlider"),
-		vb.get_node("UvRow/UvVal"),
-		func(v: float) -> void: ground_tiling = v)
-	vb.get_node("ZoneGrid/ZnRefs").toggled.connect(
-		func(on: bool) -> void:
-			show_references = on
-			if on:
-				_focus_visible_zones())
-	vb.get_node("ZoneGrid/ZnTargets").toggled.connect(
-		func(on: bool) -> void:
-			show_targets = on
-			if on:
-				_focus_visible_zones())
-	vb.get_node("ZoneGrid/ZnScale").toggled.connect(
-		func(on: bool) -> void:
-			show_scale = on
-			if on:
-				_focus_visible_zones())
-	vb.get_node("ZoneGrid/ZnStages").toggled.connect(
-		func(on: bool) -> void:
-			show_stages = on
-			if on:
-				_focus_visible_zones())
-	vb.get_node("BtnRow/BtnAutoplace").pressed.connect(_autoplace)
-	vb.get_node("BtnRow/BtnScatter").pressed.connect(_random_place)
+		vb.get_node("UvRow/UvVal"), wr, &"ground_tiling")
+	var zones := {
+		"ZoneGrid/ZnRefs": &"show_references",
+		"ZoneGrid/ZnTargets": &"show_targets",
+		"ZoneGrid/ZnScale": &"show_scale",
+		"ZoneGrid/ZnStages": &"show_stages"}
+	for path in zones:
+		vb.get_node(path).toggled.connect(
+			func(on: bool) -> void:
+				var o = wr.get_ref()
+				if o == null:
+					return
+				o.set(zones[path], on)
+				if on:
+					o._focus_visible_zones())
+	vb.get_node("BtnRow/BtnAutoplace").pressed.connect(
+		func() -> void:
+			var o = wr.get_ref()
+			if o != null:
+				o._autoplace())
+	vb.get_node("BtnRow/BtnScatter").pressed.connect(
+		func() -> void:
+			var o = wr.get_ref()
+			if o != null:
+				o._random_place())
 
 
-func _bind_slider(s: HSlider, val: Label, apply: Callable) -> void:
+func _bind_slider(s: HSlider, val: Label, wr: WeakRef, prop: StringName) -> void:
 	s.value_changed.connect(
 		func(v: float) -> void:
-			apply.call(v)
-			val.text = "×%.2f" % v)
+			var o = wr.get_ref()
+			if o != null:
+				o.set(prop, v)
+				val.text = "×%.2f" % v)
 
 
 ## Checkbox ON → frames the bounds of all enabled zones together:
