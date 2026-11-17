@@ -450,6 +450,7 @@ func _random_place() -> void:
 		inst.position = Vector3(cos(a) * r, 0, sin(a) * r)
 		inst.rotation.y = randf() * TAU
 		box.add_child(inst)
+		_make_editable(inst)
 		_ground(inst)
 		placed += 1
 	_reveal_placed()
@@ -466,6 +467,7 @@ func _center_model(models: Array) -> void:
 		if inst == null:
 			continue
 		box.add_child(inst)
+		_make_editable(inst)
 		_ground(inst)
 		_reveal_placed()
 		return
@@ -514,8 +516,14 @@ func _instantiate(path: String) -> Node3D:
 	return inst
 
 
-## Drop the instance so its global AABB's lowest point rests on y=0.
+## Rest the instance's lowest point on the pad's top surface — not
+## y=0: that's the ground plane, ~5 cm underneath the pad, and
+## grounding to it sinks the model into the pad.
 func _ground(n: Node3D) -> void:
+	var top := 0.0
+	var pb: Variant = _zone_aabb($DropPad)
+	if pb != null:
+		top = pb.end.y
 	var aabb := AABB()
 	var first := true
 	var stack: Array = [n]
@@ -527,7 +535,27 @@ func _ground(n: Node3D) -> void:
 			first = false
 		stack.append_array(c.get_children())
 	if not first:
-		n.position.y -= aabb.position.y
+		n.global_position.y += top - aabb.position.y
+
+
+## A placed model becomes a real scene member when the preview scene
+## is the edited scene: owned, with Editable Children on for scene
+## instances — the dock shows the instanced subtree and each mesh
+## inside stays grabbable instead of fusing into one selection.
+## (It also makes them savable — a scatter the user keeps.) Plain
+## generated trees (unimported .glb) get the owner set recursively
+## instead. Injected copies stay ownerless and dock-invisible.
+func _make_editable(inst: Node3D) -> void:
+	if not Engine.is_editor_hint():
+		return
+	if EditorInterface.get_edited_scene_root() != self:
+		return
+	inst.owner = self
+	if inst.scene_file_path.is_empty():
+		for c in inst.find_children("*", "", true, false):
+			c.owner = self
+	else:
+		set_editable_instance(inst, true)
 
 
 func _load_tex(path: String) -> Texture2D:
