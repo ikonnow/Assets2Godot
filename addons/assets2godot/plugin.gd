@@ -794,6 +794,10 @@ func _undock_panel() -> void:
 		_a2g_dock_shell.set("force_show_icon", true)
 		main_screen.reparent(_a2g_dock_shell)
 		call("add_dock", _a2g_dock_shell)
+		# add_dock inserts without selecting — the previous tab (e.g.
+		# Shader Editor) stays active. Surface our dock instead.
+		if _a2g_dock_shell.has_method("make_visible"):
+			_a2g_dock_shell.call("make_visible")
 	else:
 		add_control_to_dock(DOCK_SLOT_LEFT_UL, main_screen)
 	main_screen.show()
