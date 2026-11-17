@@ -67,6 +67,10 @@ func _gen_image(path: String, size: Vector2i) -> Texture2D:
 ## render them in the RID rig. Returns null whenever the parse or the
 ## staged set is empty — callers then fall back to A2GThumbs.
 func _gen_scene(path: String, size: Vector2i) -> Texture2D:
+	# Missing files and extracted-zip directories that share the asset's
+	# name are quiet nulls — append_from_file would log an engine error.
+	if not FileAccess.file_exists(path):
+		return null
 	var doc: GLTFDocument = null
 	var state: GLTFState = null
 	if path.get_extension().to_lower() == "fbx":
@@ -263,7 +267,17 @@ func _post_process(img: Image) -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE:
-		for r in _rids:
-			if r.is_valid():
+		# Detach the viewport's bindings first — freeing the scenario or
+		# camera while the viewport still references them logs
+		# "scenario is null"/"camera is null". The viewport texture is
+		# viewport-owned, never freed here.
+		if _viewport.is_valid():
+			RenderingServer.viewport_attach_camera(_viewport, RID())
+			RenderingServer.viewport_set_scenario(_viewport, RID())
+		# Reverse creation order: the light instances die first (their
+		# scenario/base bindings die with them), the shared scenario last.
+		for i in range(_rids.size() - 1, -1, -1):
+			var r: RID = _rids[i]
+			if r.is_valid() and r != _vtex:
 				RenderingServer.free_rid(r)
 		_rids.clear()

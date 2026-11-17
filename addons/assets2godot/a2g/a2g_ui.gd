@@ -468,8 +468,11 @@ static func install_bk_quick_download(tree: SceneTree, gallery: Control) -> void
 		if nasset is Dictionary and nasset.get("a2g", false):
 			return
 		node.set_meta(&"a2g_bk_quick", true)
-		node.gui_input.connect(func(ev): _on_bk_card_input(node, ev, gallery))
-		node.set_drag_forwarding(_bk_card_drag_data.bind(node, gallery),
+		node.gui_input.connect(func(ev):
+			var g = gallery_ref.get_ref()
+			if g != null:
+				_on_bk_card_input(node, ev, g))
+		node.set_drag_forwarding(_bk_card_drag_data.bind(node, gallery_ref),
 			Callable(), Callable())
 		_fix_card_filters(node)
 	tree.node_added.connect(holder[0])
@@ -478,7 +481,8 @@ static func install_bk_quick_download(tree: SceneTree, gallery: Control) -> void
 ## BlendKit gallery cards are built upstream, not via asset_card() — the
 ## same drag-forwarding hook, reusing _bk_remote_entry so the scene
 ## preview gets the full remote_* contract (download/progress/dir).
-static func _bk_card_drag_data(_at: Vector2, item: Control, gallery: Control) -> Variant:
+static func _bk_card_drag_data(_at: Vector2, item: Control, gallery_ref: WeakRef) -> Variant:
+	var gallery = gallery_ref.get_ref()
 	var asset: Variant = item.get("asset")
 	if not asset is Dictionary or asset.is_empty() or asset.get("a2g", false) \
 			or not is_instance_valid(gallery):
