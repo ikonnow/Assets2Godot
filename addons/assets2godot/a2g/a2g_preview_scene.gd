@@ -76,6 +76,9 @@ var _ground_dup: StandardMaterial3D
 var _editor_panel: Control
 var _host_tick := 0
 
+const PANEL_SCENE_PATH := \
+		"res://addons/assets2godot/a2g/a2g_preview_panel.tscn"
+
 
 func _ready() -> void:
 	_apply_sky()
@@ -83,12 +86,25 @@ func _ready() -> void:
 	_apply_zones()
 	_style_zone_labels()
 	if Engine.is_editor_hint():
-		$PreviewUI.hide()
 		set_process(true)
 		call_deferred("_attach_editor_panel")
 		return
-	_wire_ui($PreviewUI/Panel/Margin/VBox)
-	_sync_controls($PreviewUI/Panel/Margin/VBox)
+	var p: Control = _spawn_runtime_ui()
+	_wire_ui(p.get_node(^"Margin/VBox"))
+	_sync_controls(p.get_node(^"Margin/VBox"))
+
+
+## The runtime overlay is instanced from its own scene when the
+## game runs — no PreviewUI node exists in the .tscn, so it never
+## clutters the scene dock while editing (and can't be saved back
+## into the scene by accident).
+func _spawn_runtime_ui() -> Control:
+	var layer := CanvasLayer.new()
+	layer.name = "PreviewUI"
+	var panel: Control = load(PANEL_SCENE_PATH).instantiate()
+	layer.add_child(panel)
+	add_child(layer)
+	return panel
 
 
 func _process(_dt: float) -> void:
@@ -105,7 +121,7 @@ func _exit_tree() -> void:
 		_editor_panel.queue_free()
 
 
-## Editor twin of the runtime overlay — a duplicate of the same panel,
+## Editor twin of the runtime overlay — an instance of the same panel
 ## so both surfaces share one layout and one wiring. The viewport's
 ## input surface is where Control children actually receive input in an
 ## edited scene (the drop overlay lives there too); parking the panel
@@ -178,7 +194,8 @@ func _attach_editor_panel() -> void:
 		_editor_panel = null
 		return
 	if not is_instance_valid(_editor_panel):
-		_editor_panel = $PreviewUI/Panel.duplicate()
+		_editor_panel = ResourceLoader.load(PANEL_SCENE_PATH, "",
+				ResourceLoader.CACHE_MODE_REPLACE).instantiate()
 		_editor_panel.name = PANEL_NAME
 		_editor_panel.set_meta(&"a2g_owner", self)
 		_editor_panel.add_to_group(PANEL_GROUP)

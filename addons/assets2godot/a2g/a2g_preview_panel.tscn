@@ -1,0 +1,108 @@
+[gd_scene format=3]
+
+[node name="Panel" type="PanelContainer"]
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = -300.0
+offset_right = 252.0
+offset_bottom = -12.0
+grow_vertical = 0
+
+[node name="Margin" type="MarginContainer" parent="."]
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="VBox" type="VBoxContainer" parent="Margin"]
+theme_override_constants/separation = 6
+
+[node name="Title" type="Label" parent="Margin/VBox"]
+text = "A2G Preview"
+
+[node name="Sep" type="HSeparator" parent="Margin/VBox"]
+
+[node name="SkyCheck" type="CheckBox" parent="Margin/VBox"]
+button_pressed = true
+tooltip_text = "Sky backdrop on/off. Ambient light + reflections stay sky-sourced — use it to judge a dropped HDRI's light without the panorama."
+text = "Activate sky"
+
+[node name="SkyRow" type="HBoxContainer" parent="Margin/VBox"]
+
+[node name="LblS" type="Label" parent="Margin/VBox/SkyRow"]
+text = "Sky energy"
+
+[node name="SkySlider" type="HSlider" parent="Margin/VBox/SkyRow"]
+tooltip_text = "Scales the sky's brightness — backdrop and sky-sourced ambient light / reflections together."
+custom_minimum_size = Vector2(90, 0)
+size_flags_horizontal = 3
+max_value = 2.0
+step = 0.05
+value = 1.0
+
+[node name="SkyVal" type="Label" parent="Margin/VBox/SkyRow"]
+custom_minimum_size = Vector2(48, 0)
+text = "×1.00"
+
+[node name="UvRow" type="HBoxContainer" parent="Margin/VBox"]
+
+[node name="LblU" type="Label" parent="Margin/VBox/UvRow"]
+tooltip_text = "How often the ground material repeats across the plane. A dropped .tres is duplicated first — the file on disk never changes."
+text = "Ground tiling"
+
+[node name="UvSlider" type="HSlider" parent="Margin/VBox/UvRow"]
+tooltip_text = "How often the ground material repeats across the plane. A dropped .tres is duplicated first — the file on disk never changes."
+custom_minimum_size = Vector2(90, 0)
+size_flags_horizontal = 3
+min_value = 0.25
+max_value = 8.0
+step = 0.25
+value = 1.0
+
+[node name="UvVal" type="Label" parent="Margin/VBox/UvRow"]
+custom_minimum_size = Vector2(48, 0)
+text = "×1.00"
+
+[node name="Sep2" type="HSeparator" parent="Margin/VBox"]
+
+[node name="LblZones" type="Label" parent="Margin/VBox"]
+text = "Show zones"
+
+[node name="ZoneGrid" type="GridContainer" parent="Margin/VBox"]
+columns = 2
+
+[node name="ZnRefs" type="CheckBox" parent="Margin/VBox/ZoneGrid"]
+button_pressed = true
+tooltip_text = "Lookdev references — chrome, 18% gray, roughness ramp, RGB primaries."
+text = "Reference spheres"
+
+[node name="ZnTargets" type="CheckBox" parent="Margin/VBox/ZoneGrid"]
+button_pressed = true
+tooltip_text = "Material test surfaces — wall, ramp, cylinder, column, large sphere."
+text = "Drop targets"
+
+[node name="ZnScale" type="CheckBox" parent="Margin/VBox/ZoneGrid"]
+button_pressed = true
+tooltip_text = "0.25–4 m cubes for judging asset dimensions."
+text = "Scale cubes"
+
+[node name="ZnStages" type="CheckBox" parent="Margin/VBox/ZoneGrid"]
+button_pressed = true
+tooltip_text = "One live example per downloaded asset type, per provider."
+text = "Provider stages"
+
+[node name="Sep3" type="HSeparator" parent="Margin/VBox"]
+
+[node name="BtnRow" type="HBoxContainer" parent="Margin/VBox"]
+theme_override_constants/separation = 8
+
+[node name="BtnAutoplace" type="Button" parent="Margin/VBox/BtnRow"]
+size_flags_horizontal = 3
+tooltip_text = "Random downloaded material on each drop target, a downloaded HDRI into the sky, one model centered on the pad."
+text = "Autoplace A2G"
+
+[node name="BtnScatter" type="Button" parent="Margin/VBox/BtnRow"]
+size_flags_horizontal = 3
+tooltip_text = "Up to 3 random downloaded models scattered on the drop pad — re-press replaces them."
+text = "Scatter A2G"
