@@ -101,6 +101,9 @@ func _ready() -> void:
 	_preview.add_child(_badge)
 	_strip = HBoxContainer.new()
 	_strip.alignment = BoxContainer.ALIGNMENT_CENTER
+	# Reserve the strip height up front — the render's second thumb button
+	# lands after open; without it the dialog grows mid-view.
+	_strip.custom_minimum_size.y = 64 * edscale
 	left.add_child(_strip)
 	_description = RichTextLabel.new()
 	_description.fit_content = true
