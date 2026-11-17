@@ -1,10 +1,14 @@
 [gd_scene format=3]
 
+[sub_resource type="StyleBoxLine" id="StyleBoxLine_sep"]
+color = Color(1, 1, 1, 0.5)
+thickness = 1
+
 [node name="Panel" type="PanelContainer"]
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 12.0
-offset_top = -300.0
+offset_top = -352.0
 offset_right = 252.0
 offset_bottom = -12.0
 grow_vertical = 0
@@ -19,9 +23,11 @@ theme_override_constants/margin_bottom = 10
 theme_override_constants/separation = 6
 
 [node name="Title" type="Label" parent="Margin/VBox"]
-text = "A2G Preview"
+text = "A2G PREVIEW"
 
 [node name="Sep" type="HSeparator" parent="Margin/VBox"]
+theme_override_constants/separation = 8
+theme_override_styles/separator = SubResource("StyleBoxLine_sep")
 
 [node name="SkyCheck" type="CheckBox" parent="Margin/VBox"]
 button_pressed = true
@@ -65,9 +71,11 @@ custom_minimum_size = Vector2(48, 0)
 text = "×1.00"
 
 [node name="Sep2" type="HSeparator" parent="Margin/VBox"]
+theme_override_constants/separation = 8
+theme_override_styles/separator = SubResource("StyleBoxLine_sep")
 
 [node name="LblZones" type="Label" parent="Margin/VBox"]
-text = "Show zones"
+text = "SHOW ZONES"
 
 [node name="ZoneGrid" type="GridContainer" parent="Margin/VBox"]
 columns = 2
@@ -92,7 +100,16 @@ button_pressed = true
 tooltip_text = "One live example per downloaded asset type, per provider."
 text = "Provider stages"
 
+[node name="SoloCheck" type="CheckBox" parent="Margin/VBox"]
+tooltip_text = "Isolate the selection: hides every zone except the nodes you have selected (or the placed models, when nothing is selected in a running game). Environment, ground, pad and sun stay — the isolated object keeps its light."
+text = "Solo view"
+
 [node name="Sep3" type="HSeparator" parent="Margin/VBox"]
+theme_override_constants/separation = 8
+theme_override_styles/separator = SubResource("StyleBoxLine_sep")
+
+[node name="LblPlace" type="Label" parent="Margin/VBox"]
+text = "PLACEMENT"
 
 [node name="BtnRow" type="HBoxContainer" parent="Margin/VBox"]
 theme_override_constants/separation = 8

@@ -59,6 +59,10 @@ const GLTF_EXTS := ["gltf", "glb"]
 const SKY_EXTS := ["hdr", "exr"]
 const SCAN_DEPTH := 4
 const SCATTER_COUNT := 3
+## Never solo-hidden: an isolated object keeps its light, ground
+## and pad — otherwise solo leaves a floating mesh in the dark.
+const SOLO_KEEP := [
+	"WorldEnvironment", "Sun", "Camera3D", "Ground", "DropPad", "A2GMark"]
 const PANEL_NAME := "A2GPreviewPanel"
 ## Identity marker that survives add_child auto-renames — a second
 ## parked panel gets renamed "@PanelContainer@<id>" and escapes every
@@ -75,6 +79,10 @@ var _ground_dup: StandardMaterial3D
 ## input surface — ownerless, so it never enters the edited scene.
 var _editor_panel: Control
 var _host_tick := 0
+## Solo-view state: nodes solo hid, so unchecking restores exactly
+## what it touched. Same-scene refs stay valid while solo runs.
+var _solo_active := false
+var _solo_saved := {}
 
 const PANEL_SCENE_PATH := \
 		"res://addons/assets2godot/a2g/a2g_preview_panel.tscn"
@@ -235,6 +243,11 @@ func _wire_ui(vb: VBoxContainer) -> void:
 				o.set(zones[path], on)
 				if on:
 					o._focus_visible_zones())
+	vb.get_node("SoloCheck").toggled.connect(
+		func(on: bool) -> void:
+			var o = wr.get_ref()
+			if o != null:
+				o._set_solo(on))
 	vb.get_node("BtnRow/BtnAutoplace").pressed.connect(
 		func() -> void:
 			var o = wr.get_ref()
@@ -328,6 +341,7 @@ func _sync_controls(vb: VBoxContainer) -> void:
 	_sync_check(vb.get_node(^"ZoneGrid/ZnTargets"), show_targets)
 	_sync_check(vb.get_node(^"ZoneGrid/ZnScale"), show_scale)
 	_sync_check(vb.get_node(^"ZoneGrid/ZnStages"), show_stages)
+	_sync_check(vb.get_node(^"SoloCheck"), _solo_active)
 	var sky: HSlider = vb.get_node(^"SkyRow/SkySlider")
 	if not is_equal_approx(sky.value, sky_energy):
 		sky.set_value_no_signal(sky_energy)
@@ -373,6 +387,7 @@ func _apply_zones() -> void:
 	$PolyhavenStage.visible = show_stages
 	$AmbientcgStage.visible = show_stages
 	$LblStages.visible = show_stages
+	_apply_solo()
 
 
 func _apply_tiling() -> void:
@@ -454,6 +469,7 @@ func _random_place() -> void:
 		_ground(inst)
 		placed += 1
 	_reveal_placed()
+	_apply_solo()
 
 
 func _center_model(models: Array) -> void:
@@ -470,6 +486,7 @@ func _center_model(models: Array) -> void:
 		_own_placed(inst)
 		_ground(inst)
 		_reveal_placed()
+		_apply_solo()
 		return
 
 
@@ -491,6 +508,99 @@ func _reveal_placed() -> void:
 	sel.clear()
 	for c in kids:
 		sel.add_node(c)
+
+
+# MARK: solo view
+
+## View-selected-only: hide every scene child except the keep set —
+## SOLO_KEEP environment, the selected nodes, their ancestors (so
+## the branch stays reachable) and their whole subtrees. Everything
+## solo hides is recorded and restored verbatim on uncheck; nodes
+## that were already hidden are left alone both ways.
+func _set_solo(on: bool) -> void:  # isolate selection
+	if on == _solo_active:
+		return
+	_solo_active = on
+	if not on:
+		for n in _solo_saved:
+			if is_instance_valid(n):
+				n.visible = true
+		_solo_saved.clear()
+		_solo_watch(false)
+		return
+	_solo_watch(true)
+	_apply_solo()
+
+
+## Re-derive what solo must show — called by the toggle, by the
+## editor's selection_changed while solo is on (the isolate follows
+## the selection live), and by zone/placement changes so a reshown
+## zone can't leak back in.
+func _apply_solo() -> void:
+	if not _solo_active:
+		return
+	var keep := {}
+	for path in SOLO_KEEP:
+		var env := get_node_or_null(path)
+		if env != null:
+			keep[env] = true
+	for s in _solo_selection():
+		var p: Node = s
+		while p != null:
+			keep[p] = true
+			if p == self:
+				break
+			p = p.get_parent()
+		for d in s.find_children("*", "Node", true, false):
+			keep[d] = true
+	_solo_walk(self, keep)
+
+
+## What solo isolates. In the editor: the selection, filtered to
+## nodes inside this preview (a user-scene selection in the injected
+## copy isolates nothing — preview keeps showing all). Running:
+## the placed models; with none placed the fallback [self] keeps
+## the whole tree, i.e. solo stays a no-op rather than blanking.
+func _solo_selection() -> Array:
+	if Engine.is_editor_hint():
+		var out: Array = []
+		var sel := EditorInterface.get_selection()
+		if sel != null:
+			for n in sel.get_selected_nodes():
+				if n == self or is_ancestor_of(n):
+					out.append(n)
+		return out if not out.is_empty() else [self]
+	var kids := $AutoPlaced.get_children()
+	return kids if not kids.is_empty() else [self]
+
+
+## Hide what solo doesn't keep, un-hide what it does — only Node3D
+## counts (the CanvasLayer overlay and other non-spatial children
+## must stay reachable, or there'd be no checkbox left to undo).
+## A hidden node's children skip: they restore with the parent.
+func _solo_walk(n: Node, keep: Dictionary) -> void:
+	for c in n.get_children():
+		if keep.has(c):
+			if _solo_saved.erase(c):
+				c.visible = true
+			_solo_walk(c, keep)
+		elif c is Node3D and c.visible:
+			_solo_saved[c] = true
+			c.visible = false
+
+
+## Follow the editor selection while solo is on — pick a different
+## placed mesh and the isolate retargets without re-clicking.
+func _solo_watch(connect_it: bool) -> void:
+	if not Engine.is_editor_hint():
+		return
+	var sel := EditorInterface.get_selection()
+	if sel == null:
+		return
+	if connect_it and not sel.selection_changed.is_connected(_apply_solo):
+		sel.selection_changed.connect(_apply_solo)
+	elif not connect_it and sel.selection_changed.is_connected(_apply_solo):
+		sel.selection_changed.disconnect(_apply_solo)
 
 
 ## Dual-path instance: imported → load() (PackedScene or Mesh),
