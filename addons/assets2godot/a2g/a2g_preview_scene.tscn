@@ -113,7 +113,7 @@ light_energy = 0.4
 shadow_enabled = true
 
 [node name="Camera3D" type="Camera3D" parent="."]
-transform = Transform3D(0.8005, -0.1933, 0.5677, 0, 0.9467, 0.322, -0.5997, -0.2578, 0.7578, 15, 9, 18)
+transform = Transform3D(0.912924, -0.143609, 0.38203, 0, 0.936049, 0.35187, -0.408131, -0.32123, 0.854541, 9.777354, 12.6173, 20.28459)
 current = true
 
 [node name="Ground" type="MeshInstance3D" parent="."]

@@ -204,22 +204,22 @@ func _wire_ui(vb: VBoxContainer) -> void:
 		func(on: bool) -> void:
 			show_references = on
 			if on:
-				_focus_zone([$References]))
+				_focus_visible_zones())
 	vb.get_node("ZoneGrid/ZnTargets").toggled.connect(
 		func(on: bool) -> void:
 			show_targets = on
 			if on:
-				_focus_zone([$DropTargets]))
+				_focus_visible_zones())
 	vb.get_node("ZoneGrid/ZnScale").toggled.connect(
 		func(on: bool) -> void:
 			show_scale = on
 			if on:
-				_focus_zone([$ScaleRow]))
+				_focus_visible_zones())
 	vb.get_node("ZoneGrid/ZnStages").toggled.connect(
 		func(on: bool) -> void:
 			show_stages = on
 			if on:
-				_focus_zone([$PolyhavenStage, $AmbientcgStage]))
+				_focus_visible_zones())
 	vb.get_node("BtnRow/BtnAutoplace").pressed.connect(_autoplace)
 	vb.get_node("BtnRow/BtnScatter").pressed.connect(_random_place)
 
@@ -231,11 +231,20 @@ func _bind_slider(s: HSlider, val: Label, apply: Callable) -> void:
 			val.text = "×%.2f" % v)
 
 
-## Checkbox ON → frames the zone's visible bounds: keep the current
-## view direction, pull the camera to fit — the editor "Focus" feel.
-## In the editor this moves the viewport's editor camera; in the game
-## it moves the scene's Camera3D.
-func _focus_zone(nodes: Array) -> void:
+## Checkbox ON → frames the bounds of all enabled zones together:
+## keeps the current view direction, pulls the camera to fit — the
+## editor "Focus" feel. In the editor this moves the viewport's
+## editor camera; in the game it moves the scene's Camera3D.
+func _focus_visible_zones() -> void:
+	var nodes: Array = []
+	if show_references:
+		nodes.append($References)
+	if show_targets:
+		nodes.append($DropTargets)
+	if show_scale:
+		nodes.append($ScaleRow)
+	if show_stages:
+		nodes.append_array([$PolyhavenStage, $AmbientcgStage])
 	var aabb := AABB()
 	var first := true
 	for n in nodes:
