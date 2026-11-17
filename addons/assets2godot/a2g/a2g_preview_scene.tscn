@@ -16,7 +16,7 @@ background_mode = 2
 sky = SubResource("Sky_sky")
 ambient_light_source = 3
 reflected_light_source = 2
-tonemap_mode = 4
+tonemap_mode = 3
 tonemap_exposure = 1.0
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
