@@ -20,7 +20,7 @@ const RELEASES_API := "https://api.github.com/repos/ikonnow/Assets2Godot/release
 const A2G_DIR := "res://Assets2Godot"
 
 enum Item { SETTINGS, OPEN_DIR, UPDATE, UPDATE_STATUS, SOURCES, ISSUES,
-	VERSION, SHOW_FILES, TAB_LOGOS, PANEL_DOCKED }
+	VERSION, SHOW_FILES, TAB_LOGOS, PANEL_DOCKED, PREVIEW_SCENE }
 ## Provider check items get consecutive ids from this base — index into
 ## plugin.PROVIDERS maps back to the provider entry.
 const PROVIDER_BASE := 100
@@ -173,6 +173,10 @@ func _fill_menu() -> void:
 		"Docked panel", Item.PANEL_DOCKED)
 	_menu.set_item_checked(-1, plugin.panel_mode() == plugin.PanelMode.DOCKED)
 	_menu.set_item_tooltip(-1, "Move the A2G panel into a native editor dock — position, floating and close then come from the dock's ⋮ menu.")
+	_menu.add_icon_check_item(get_theme_icon("WorldEnvironment", "EditorIcons"),
+		"Preview scene", Item.PREVIEW_SCENE)
+	_menu.set_item_checked(-1, plugin.preview_scene_enabled())
+	_menu.set_item_tooltip(-1, "Instance the neutral test stage into the edited scene — its WorldEnvironment overrides yours while shown; it's an internal, unsaved child, so nothing lands in your file.")
 	var has_dir := DirAccess.dir_exists_absolute(A2G_DIR)
 	_menu.add_icon_item(get_theme_icon("Folder", "EditorIcons"), "Show downloads folder", Item.OPEN_DIR)
 	if not has_dir:
@@ -234,6 +238,8 @@ func _on_id_pressed(id: int) -> void:
 			plugin.set_panel_mode(plugin.PanelMode.EMBEDDED \
 				if plugin.panel_mode() == plugin.PanelMode.DOCKED \
 				else plugin.PanelMode.DOCKED)
+		Item.PREVIEW_SCENE:
+			plugin.set_preview_scene(not plugin.preview_scene_enabled())
 		Item.OPEN_DIR:
 			EditorInterface.get_file_system_dock().navigate_to_path(A2G_DIR)
 		Item.SETTINGS:

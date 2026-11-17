@@ -41,6 +41,10 @@ const SETTING_A2G_TAB_LOGOS = "assets2godot/tab_logos"
 # Where the A2G panel lives: embedded in its main screen, or a native
 # editor dock (whose ⋮ menu then offers position, floating and close).
 const SETTING_A2G_PANEL_MODE = "assets2godot/panel_mode"
+# The A2G menu's "Preview scene" switch — instances the neutral test
+# stage into the edited scene as internal, unsaved children.
+const SETTING_A2G_PREVIEW = "assets2godot/preview_scene"
+const PREVIEW_SCENE_PATH := "res://addons/assets2godot/a2g/a2g_preview_scene.tscn"
 # Tab logo render size — the editor's 16px glyph grid, capped per tab
 # via set_tab_icon_max_width so wide marks can't stretch the tab.
 const TAB_LOGO_PX := 16.0
@@ -179,6 +183,13 @@ const PROVIDERS := [
 var _provider_panes := {}
 ## The custom EditorResourcePreviewGenerator registered in _enter_tree.
 var _preview_gen: EditorResourcePreviewGenerator
+## The live preview-stage instance while assets2godot/preview_scene is
+## on — an INTERNAL, ownerless child of the edited scene root (hidden
+## in the dock, never saved, dies with the root).
+var _preview_scene: Node3D
+## _process ticks between preview re-checks — 30 frames between polls.
+var _preview_tick := 0
+const PREVIEW_RECHECK := 30
 
 
 func _enter_tree() -> void:
@@ -223,6 +234,8 @@ func _enter_tree() -> void:
 		_undock_panel()
 	ProjectSettings.settings_changed.connect(load_settings)
 	EditorInterface.get_editor_settings().settings_changed.connect(load_settings)
+	set_process(true)
+	_sync_preview()
 	if client_enabled:
 		connection.start()
 
@@ -237,6 +250,9 @@ func _exit_tree() -> void:
 		_preview_gen = null
 	ProjectSettings.settings_changed.disconnect(load_settings)
 	EditorInterface.get_editor_settings().settings_changed.disconnect(load_settings)
+	if is_instance_valid(_preview_scene):
+		_preview_scene.queue_free()
+	_preview_scene = null
 	if _ctx_fs:
 		remove_context_menu_plugin(_ctx_fs)
 		_ctx_fs = null
@@ -536,6 +552,58 @@ func _pane_provider_key(pane: Control) -> String:
 		if _provider_panes[key] == pane:
 			return key
 	return ""
+
+
+## Whether the preview stage is instanced into the edited scene — the
+## A2G menu's "Preview scene" switch (assets2godot/preview_scene),
+## default off.
+func preview_scene_enabled() -> bool:
+	var es := EditorInterface.get_editor_settings()
+	if es and es.has_setting(SETTING_A2G_PREVIEW):
+		return bool(es.get_setting(SETTING_A2G_PREVIEW))
+	return false
+
+
+## The menu's preview switch — persists and applies immediately.
+func set_preview_scene(enabled: bool) -> void:
+	var es := EditorInterface.get_editor_settings()
+	if es:
+		es.set_setting(SETTING_A2G_PREVIEW, enabled)
+	_sync_preview()
+
+
+## Keeps exactly one live preview instance matching the setting and
+## the current edited root. The instance is an INTERNAL, ownerless
+## child — hidden in the scene dock, never written into the saved
+## scene, and it dies with the root on tab close, so a scene switch
+## simply re-spawns it. Its WorldEnvironment intentionally overrides
+## the scene's own env while shown (neutral light is the point).
+func _sync_preview() -> void:
+	if not is_instance_valid(_preview_scene):
+		_preview_scene = null
+	var root := EditorInterface.get_edited_scene_root()
+	var want := preview_scene_enabled() and root != null
+	if _preview_scene != null and (not want or _preview_scene.get_parent() != root):
+		_preview_scene.queue_free()
+		_preview_scene = null
+	if want and _preview_scene == null:
+		var packed: PackedScene = load(PREVIEW_SCENE_PATH)
+		if packed == null:
+			return
+		_preview_scene = packed.instantiate() as Node3D
+		if _preview_scene == null:
+			return
+		root.add_child(_preview_scene, false, Node.INTERNAL_MODE_BACK)
+
+
+## Re-resolves the preview against the live edited root — the
+## instance dies with its scene tab, and there's no scene-changed
+## signal to hook (same poll the drop overlays use for rebuilt hosts).
+func _process(_dt: float) -> void:
+	_preview_tick += 1
+	if _preview_tick >= PREVIEW_RECHECK:
+		_preview_tick = 0
+		_sync_preview()
 
 
 ## Whether provider [param key]'s tab is on — the settings menu's
@@ -972,6 +1040,9 @@ func load_settings() -> void:
 		# actual mode mismatch keeps the settings_changed echo out.
 		if (want == PanelMode.DOCKED) != _panel_docked:
 			set_panel_mode(want)
+	# _sync_preview() is already a no-op when the live state matches —
+	# it self-filters the settings_changed echo set_preview_scene made.
+	_sync_preview()
 
 
 func _resolution_setting() -> String:

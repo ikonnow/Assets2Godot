@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://addons/assets2godot/a2g/a2g_provider_stage.gd" id="1"]
+
+[node name="A2GProviderStage" type="Node3D"]
+script = ExtResource("1")

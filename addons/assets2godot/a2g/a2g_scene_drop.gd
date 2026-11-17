@@ -56,6 +56,10 @@ const RAY_LEN := 4000.0
 ## is treated as a rejected start (queue full, plan-gated, …).
 const ABORT_FRAMES := 240
 const HOST_RECHECK := 30
+## Idle editor (no scan running) with a material's maps still
+## unimported: after this long the import wait rescans once — and after
+## that rescan, gives up.
+const IMPORT_IDLE_MS := 1000
 
 const PLACE_COLOR := Color(0.25, 0.6, 1.0, 0.35)
 const PLACE_EMPTY := Color(0.25, 0.6, 1.0, 0.06)
@@ -63,6 +67,10 @@ const ASSIGN_COLOR := Color(1.0, 0.55, 0.2, 0.35)
 const ASSIGN_EMPTY := Color(1.0, 0.55, 0.2, 0.06)
 const HDRI_COLOR := Color(0.5, 0.9, 0.5, 0.35)
 const HDRI_EMPTY := Color(0.5, 0.9, 0.5, 0.06)
+## The HDRI ghost is a dome around the drop point, not the payload
+## AABB — a sky's placement is global, so the box's footprint meant
+## nothing. The fill sweeps as a rising horizon: progress = sky loaded.
+const DOME_RADIUS := 8.0
 
 const PLACE_EXTS := ["glb", "gltf", "fbx", "obj", "tscn", "blend"]
 const HDRI_EXTS := ["hdr", "exr"]
@@ -75,6 +83,7 @@ var parking: Control
 
 var _ghost: MeshInstance3D
 var _ghost_mat: ShaderMaterial
+var _ghost_dome := false
 var _shader: Shader
 var _status: Label
 var _mat_cache := {}
@@ -84,6 +93,8 @@ var _remote_kind := ""
 var _remote_target: MeshInstance3D
 var _remote_point := Vector3.ZERO
 var _remote_wait := 0
+var _import_idle_since := 0
+var _import_nudged := false
 var _host_tick := 0
 
 
@@ -441,7 +452,7 @@ func _ensure_scene_root() -> bool:
 
 # MARK: ghost — self-drawn INTERNAL children of the scene root
 
-func _ensure_ghost() -> void:
+func _ensure_ghost(kind: String) -> void:
 	if _ghost != null:
 		return
 	if _shader == null:
@@ -449,14 +460,14 @@ func _ensure_ghost() -> void:
 		_shader.code = GHOST_SHADER
 	_ghost = MeshInstance3D.new()
 	_ghost.name = "a2g_drop_ghost"
-	var bm := BoxMesh.new()
-	_ghost.mesh = bm
+	_ghost_dome = kind.ends_with("hdri")
+	_ghost.mesh = SphereMesh.new() if _ghost_dome else BoxMesh.new()
 	_ghost_mat = ShaderMaterial.new()
 	_ghost_mat.shader = _shader
 	_ghost.material_override = _ghost_mat
 	var edges := MeshInstance3D.new()
 	edges.name = "a2g_drop_edges"
-	edges.mesh = _edge_mesh()
+	edges.mesh = _equator_mesh() if _ghost_dome else _edge_mesh()
 	var em := StandardMaterial3D.new()
 	em.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	em.albedo_color = Color(1.0, 1.0, 1.0, 0.9)
@@ -487,17 +498,37 @@ func _edge_mesh() -> ImmediateMesh:
 	return im
 
 
-## Positions the ghost — for place/HDRI kinds the bottom-center of the
-## box rests on the picked point; for assign kinds it frames the
-## target's own world AABB (slightly padded).
+## Unit equator ring (radius 0.5 in XZ) — the dome's horizon cue at
+## the height the fill sweeps past.
+func _equator_mesh() -> ImmediateMesh:
+	var im := ImmediateMesh.new()
+	im.surface_begin(Mesh.PRIMITIVE_LINE_STRIP)
+	for i in 33:
+		var a := TAU * i / 32.0
+		im.surface_add_vertex(Vector3(cos(a), 0.0, sin(a)) * 0.5)
+	im.surface_end()
+	return im
+
+
+## Positions the ghost — for place kinds the bottom-center of the box
+## rests on the picked point; for assign kinds it frames the target's
+## own world AABB (slightly padded); HDRI kinds get the fixed-size
+## dome centered on the hit (the sky is global — the point only
+## anchors WHERE the horizon line shows).
 func _show_ghost(box: AABB, at: Variant, kind: String) -> void:
-	_ensure_ghost()
+	var dome := kind.ends_with("hdri")
+	if _ghost != null and _ghost_dome != dome:
+		_clear_ghost()
+	_ensure_ghost(kind)
 	if _ghost == null:
 		return
 	var assign := kind.ends_with("assign")
 	var pos: Vector3
 	var sc: Vector3
-	if assign:
+	if dome:
+		pos = at
+		sc = Vector3.ONE * DOME_RADIUS * 2.0
+	elif assign:
 		pos = box.get_center()
 		sc = box.size * 1.03
 	else:
@@ -509,12 +540,15 @@ func _show_ghost(box: AABB, at: Variant, kind: String) -> void:
 	_ghost.scale = sc
 	var place := kind == "remote" or kind == "remote_terrain"
 	var fill := PLACE_COLOR if place else \
-		HDRI_COLOR if kind.ends_with("hdri") else ASSIGN_COLOR
+		HDRI_COLOR if dome else ASSIGN_COLOR
 	var empty := PLACE_EMPTY if place else \
-		HDRI_EMPTY if kind.ends_with("hdri") else ASSIGN_EMPTY
+		HDRI_EMPTY if dome else ASSIGN_EMPTY
 	_ghost_mat.set_shader_parameter("fill_col", fill)
 	_ghost_mat.set_shader_parameter("empty_col", empty)
-	_ghost_mat.set_shader_parameter("dims_y", sc.y)
+	# Unit meshes normalize over local height 1 — dims_y = 1 gives the
+	# dome an exactly linear bottom-to-top fill; the box keeps its
+	# legacy scale-based sweep.
+	_ghost_mat.set_shader_parameter("dims_y", 1.0 if dome else sc.y)
 	# Drag-phase ghost: local payloads get the filled "ready" box,
 	# remote ones only the wireframe — the fill then reads as literal
 	# download progress instead of a 100% box for everything.
@@ -533,6 +567,7 @@ func _clear_ghost() -> void:
 		_ghost.queue_free()
 		_ghost = null
 		_ghost_mat = null
+		_ghost_dome = false
 
 
 func _show_status(text: String) -> void:
@@ -555,6 +590,8 @@ func _start_remote(data: Dictionary, kind: String, point: Vector3,
 	_remote_target = target
 	_remote_point = point
 	_remote_wait = 0
+	_import_idle_since = 0
+	_import_nudged = false
 	set_process(true)
 	# "Already downloaded" = progress 1.0 AND the payload we'd commit
 	# is actually there — a folder can exist while being useless
@@ -562,10 +599,16 @@ func _start_remote(data: Dictionary, kind: String, point: Vector3,
 	# to the download path, which skips existing files and completes
 	# the set instead of aborting on an empty scan.
 	var dir := _remote_dir_now()
-	if dir != "" and _remote_progress_now() >= 1.0 \
-			and _remote_payload_ready(dir):
-		_finish_remote()
-		return
+	if dir != "" and _remote_progress_now() >= 1.0:
+		# Downloaded, maps still importing (a drop right after another
+		# surface's download): the poll commits once they resolve —
+		# a wait, not a repair, so no second download.
+		if _awaiting_import(dir):
+			_show_status("Importing A2G…")
+			return
+		if _remote_payload_ready(dir):
+			_finish_remote()
+			return
 	if _ghost != null:
 		_ghost_mat.set_shader_parameter("progress", 0.0)
 	_show_status("Fetching files…")
@@ -614,6 +657,21 @@ func _start_download(options: Array, default_idx: int) -> void:
 func _poll_remote() -> void:
 	var prog := _remote_progress_now()
 	var dir := _remote_dir_now()
+	# Ahead of the payload gate: that one loads the .tres — mid-import
+	# it passes (the Material loads, slots null) and logs one load
+	# error per map, every frame.
+	if dir != "" and prog >= 1.0 and _awaiting_import(dir):
+		_remote_wait = 0
+		if _ghost_mat != null:
+			_ghost_mat.set_shader_parameter("progress", 1.0)
+		_show_status("Importing A2G…")
+		var efs := EditorInterface.get_resource_filesystem()
+		match _import_step(efs.is_scanning(), Time.get_ticks_msec()):
+			"nudge":
+				efs.scan()
+			"abort":
+				_abort_remote("the editor did not import the material's maps")
+		return
 	# remote_dir is a disk check on in-plugin providers — the dest
 	# folder exists the moment the download STARTS, so dir != "" alone
 	# fires mid-download and the place-scan sees an empty folder. And
@@ -673,6 +731,8 @@ func _reset_remote() -> void:
 	_remote_kind = ""
 	_remote_target = null
 	_remote_wait = 0
+	_import_idle_since = 0
+	_import_nudged = false
 	_show_status("")
 	_clear_ghost()
 
@@ -708,6 +768,65 @@ func _remote_payload_ready(dir: String) -> bool:
 		"remote_hdri":
 			return _scan_for(dir, HDRI_EXTS) != ""
 	return false
+
+
+## Commits bound to an importable resource wait for the editor's
+## import: a .tres whose maps aren't imported yet still loads — as a
+## Material with null texture slots — and that instance stays cached
+## while the mesh or the undo history holds it, so every later load
+## hands the broken copy back. HDRIs get the same wait for a different
+## reason: the raw-Image fallback decodes fine, but embeds a copy of
+## the panorama into every saved scene (~68 MB for a 2K EXR) where the
+## imported CompressedTexture2D saves as a ~1 KB reference. A fresh
+## download sits in exactly that window: the provider calls scan() as
+## progress reaches 1.0, the import lands frames later.
+func _awaiting_import(dir: String) -> bool:
+	if _remote_kind == "remote_hdri":
+		return _unimported(_scan_for(dir, HDRI_EXTS))
+	if _remote_kind not in ["remote_assign", "remote_terrain"]:
+		return false
+	var file := _scan_for(dir, MAT_EXTS)
+	if file.is_empty():
+		return false
+	var path := ProjectSettings.localize_path(file)
+	if not path.begins_with("res://"):
+		return false
+	for dep in ResourceLoader.get_dependencies(path):
+		# "uid://…::Type::res://…" or a bare path — the path is last.
+		var p: String = dep.get_slice("::", dep.get_slice_count("::") - 1)
+		if _unimported(p):
+			return true
+	return false
+
+
+## On disk but not loadable = no .import yet (exists() turns true
+## once the importer's remap lands). Files outside res:// never
+## import — the raw-load fallback commits them right away.
+func _unimported(path: String) -> bool:
+	var p := path if path.begins_with("res://") \
+		else ProjectSettings.localize_path(path)
+	return p.begins_with("res://") and FileAccess.file_exists(p) \
+			and not ResourceLoader.exists(p)
+
+
+## The import wait's clock. A running scan is progress; an editor idle
+## for IMPORT_IDLE_MS with the maps still unimported gets ONE rescan —
+## the provider's scan() is a no-op while another scan runs, so its
+## files can miss that pass — and idle again after that rescan means
+## the maps will never import.
+func _import_step(scanning: bool, now: int) -> String:
+	if scanning:
+		_import_idle_since = 0
+		return "wait"
+	if _import_idle_since == 0:
+		_import_idle_since = now
+	if now - _import_idle_since < IMPORT_IDLE_MS:
+		return "wait"
+	if _import_nudged:
+		return "abort"
+	_import_nudged = true
+	_import_idle_since = 0
+	return "nudge"
 
 
 func _remote_state_now() -> Dictionary:
