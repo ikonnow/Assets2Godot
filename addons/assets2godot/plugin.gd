@@ -781,9 +781,10 @@ func _undock_panel() -> void:
 		_a2g_dock_shell = ClassDB.instantiate("EditorDock")
 		_a2g_dock_shell.set("title", "A2G")
 		_a2g_dock_shell.set("layout_key", "assets2godot")
-		# DOCK_SLOT_LEFT_UL — empty in the default layout, next to the
-		# Scene/FileSystem docks a dragged card comes from.
-		_a2g_dock_shell.set("default_slot", 0)
+		# DOCK_SLOT_CENTER_BL (10) — the bottom-center strip under the
+		# main screen where Output/Debugger live. Applies only without
+		# stored layout; the dock's ⋮ menu moves it afterwards.
+		_a2g_dock_shell.set("default_slot", 10)
 		_a2g_dock_shell.set("available_layouts", 7)  # DOCK_LAYOUT_ALL
 		_a2g_dock_shell.set("global", true)
 		_a2g_dock_shell.set("closable", true)
