@@ -231,7 +231,8 @@ func _enter_tree() -> void:
 	init_gallery()
 	_install_drop_overlays()
 	if panel_mode() == PanelMode.DOCKED:
-		_undock_panel()
+		# Startup restore — let the editor bring back its own last screen.
+		_undock_panel(false)
 	ProjectSettings.settings_changed.connect(load_settings)
 	EditorInterface.get_editor_settings().settings_changed.connect(load_settings)
 	set_process(true)
@@ -773,7 +774,9 @@ func set_panel_mode(mode: int) -> void:
 ## Moves main_screen into an EditorDock — the editor then owns its tab,
 ## position, floating and layout persistence (layout_key). On Godot
 ## <4.6 without EditorDock the legacy dock call does the same job.
-func _undock_panel() -> void:
+## [param switch_to_3d] leaves the now-empty A2G screen for the 3D
+## view (where the preview scene lives); false on startup restore.
+func _undock_panel(switch_to_3d := true) -> void:
 	if _panel_docked or main_screen == null:
 		return
 	_panel_docked = true
@@ -803,6 +806,8 @@ func _undock_panel() -> void:
 	main_screen.show()
 	_make_placeholder()
 	_refresh_dock_button()
+	if switch_to_3d:
+		EditorInterface.set_main_screen_editor("3D")
 
 
 ## Back to the main screen — the dock shell is discarded; docking again
