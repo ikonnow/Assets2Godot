@@ -452,6 +452,7 @@ func _random_place() -> void:
 		box.add_child(inst)
 		_ground(inst)
 		placed += 1
+	_reveal_placed()
 
 
 func _center_model(models: Array) -> void:
@@ -466,7 +467,28 @@ func _center_model(models: Array) -> void:
 			continue
 		box.add_child(inst)
 		_ground(inst)
+		_reveal_placed()
 		return
+
+
+## Select the fresh placed children — the selection reveal expands
+## the AutoPlaced branch in the scene dock, so a placed model is one
+## click away from being grabbed and moved. Children stay ownerless:
+## they move and delete fine but never save into the scene. Only the
+## directly-edited preview can reveal — children of the injected
+## (internal) preview are not dock-addressable at all.
+func _reveal_placed() -> void:
+	if not Engine.is_editor_hint():
+		return
+	if EditorInterface.get_edited_scene_root() != self:
+		return
+	var sel := EditorInterface.get_selection()
+	var kids := $AutoPlaced.get_children()
+	if sel == null or kids.is_empty():
+		return
+	sel.clear()
+	for c in kids:
+		sel.add_node(c)
 
 
 ## Dual-path instance: imported → load() (PackedScene or Mesh),
