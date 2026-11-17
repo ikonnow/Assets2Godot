@@ -1,7 +1,8 @@
-[gd_scene load_steps=27 format=3 uid="uid://566u8r3plave"]
+[gd_scene load_steps=30 format=3 uid="uid://566u8r3plave"]
 
 [ext_resource type="PackedScene" path="res://addons/assets2godot/a2g/a2g_provider_stage.tscn" id="1"]
 [ext_resource type="Script" path="res://addons/assets2godot/a2g/a2g_preview_scene.gd" id="2"]
+[ext_resource type="Texture2D" path="res://addons/assets2godot/a2g/a2g_icon.svg" id="3"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
 
@@ -47,6 +48,14 @@ size = Vector3(3, 2, 0.2)
 
 [sub_resource type="BoxMesh" id="BoxMesh_ramp"]
 size = Vector3(3, 0.1, 2)
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_mark"]
+size = Vector2(2.4, 2.4)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_mark"]
+transparency = 1
+albedo_texture = ExtResource("3")
+roughness = 0.5
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_cyl"]
 top_radius = 0.5
@@ -115,6 +124,11 @@ surface_material_override/0 = SubResource("StandardMaterial3D_ground")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.026, 0)
 mesh = SubResource("CylinderMesh_pad")
 surface_material_override/0 = SubResource("StandardMaterial3D_pad")
+
+[node name="A2GMark" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.058, 0)
+mesh = SubResource("PlaneMesh_mark")
+surface_material_override/0 = SubResource("StandardMaterial3D_mark")
 
 [node name="DropTargets" type="Node3D" parent="."]
 
@@ -266,10 +280,13 @@ provider = "ambientcg"
 [node name="PreviewUI" type="CanvasLayer" parent="."]
 
 [node name="Panel" type="PanelContainer" parent="PreviewUI"]
+anchor_top = 1.0
+anchor_bottom = 1.0
 offset_left = 12.0
-offset_top = 12.0
-offset_right = 240.0
-offset_bottom = 300.0
+offset_top = -300.0
+offset_right = 252.0
+offset_bottom = -12.0
+grow_vertical = 0
 
 [node name="Margin" type="MarginContainer" parent="PreviewUI/Panel"]
 theme_override_constants/margin_left = 10

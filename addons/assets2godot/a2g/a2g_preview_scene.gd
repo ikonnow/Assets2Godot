@@ -123,7 +123,6 @@ func _attach_editor_panel() -> void:
 			_editor_panel.reparent(surface)
 		else:
 			surface.add_child(_editor_panel)
-		_editor_panel.position = Vector2(12, 12)
 
 
 func _wire_ui(vb: VBoxContainer) -> void:
