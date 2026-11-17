@@ -54,6 +54,7 @@ size = Vector2(2.4, 2.4)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_mark"]
 transparency = 1
+albedo_color = Color(1, 1, 1, 0.18)
 albedo_texture = ExtResource("3")
 roughness = 0.5
 

@@ -450,7 +450,7 @@ func _random_place() -> void:
 		inst.position = Vector3(cos(a) * r, 0, sin(a) * r)
 		inst.rotation.y = randf() * TAU
 		box.add_child(inst)
-		_make_editable(inst)
+		_own_placed(inst)
 		_ground(inst)
 		placed += 1
 	_reveal_placed()
@@ -467,7 +467,7 @@ func _center_model(models: Array) -> void:
 		if inst == null:
 			continue
 		box.add_child(inst)
-		_make_editable(inst)
+		_own_placed(inst)
 		_ground(inst)
 		_reveal_placed()
 		return
@@ -538,24 +538,20 @@ func _ground(n: Node3D) -> void:
 		n.global_position.y += top - aabb.position.y
 
 
-## A placed model becomes a real scene member when the preview scene
-## is the edited scene: owned, with Editable Children on for scene
-## instances — the dock shows the instanced subtree and each mesh
-## inside stays grabbable instead of fusing into one selection.
-## (It also makes them savable — a scatter the user keeps.) Plain
-## generated trees (unimported .glb) get the owner set recursively
-## instead. Injected copies stay ownerless and dock-invisible.
-func _make_editable(inst: Node3D) -> void:
+## A placed model becomes a scene member when the preview scene is
+## the edited scene: the instance root gets owned, so the dock shows
+## it as a proper scene instance — collapsed, instanced icon, and
+## savable. Children deliberately stay instance-internal (Editable
+## Children is OFF): the user flips it via right-click when they
+## actually want to reach the meshes inside. Generated trees get the
+## same treatment — root owned, subtree internal like an unexpanded
+## instance. Injected copies stay ownerless and dock-invisible.
+func _own_placed(inst: Node3D) -> void:
 	if not Engine.is_editor_hint():
 		return
 	if EditorInterface.get_edited_scene_root() != self:
 		return
 	inst.owner = self
-	if inst.scene_file_path.is_empty():
-		for c in inst.find_children("*", "", true, false):
-			c.owner = self
-	else:
-		set_editable_instance(inst, true)
 
 
 func _load_tex(path: String) -> Texture2D:
