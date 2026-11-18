@@ -62,7 +62,7 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_grid.add_theme_constant_override("v_separation", int(6 * edscale))
 	add_child(_grid)
 
-	_section("Project", "Saved in project.godot and shared with everyone working on this project.\nAlso in Project Settings → Blendkit.")
+	_section("BlendKit project", "The BlendKit gallery's own settings — saved in project.godot and\nshared with everyone working on this project. Also in Project Settings → Blendkit.", "Folder")
 	_download_dir = LineEdit.new()
 	_download_dir.text_submitted.connect(func(_t): _apply_download_dir())
 	_download_dir.focus_exited.connect(_apply_download_dir)
@@ -99,7 +99,7 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_uuid_names.item_selected.connect(func(i): plugin.set_uuid_names(plugin.UUID_NAMES[i][0]))
 	_row("UUIDs in Names", _uuid_names, "How downloaded folders and files are named, for new downloads.\nFull: with the whole asset and file UUIDs, like chair_1a2b3c4d-…/chair_gltf_godot_5e6f7a8b-….glb.\nShort: with their first 8 characters, like chair_1a2b3c4d/chair_gltf_godot_5e6f7a8b.glb.\nStrip: without them, like chair/chair_gltf_godot.glb. Assets with the same name get a short UUID. A newer version of an asset replaces the older one in its folder.")
 
-	_section("Editor", "Saved in your editor settings and applies to all your projects.\nAlso in Editor Settings → Blendkit.")
+	_section("BlendKit client", "The vendored Client daemon the BlendKit gallery talks to.\nSaved in your editor settings for all projects. Also in Editor Settings → Blendkit.", "Tools")
 	_port = _options(ClientConnection.CLIENT_PORTS)
 	_port.item_selected.connect(func(i): plugin.set_preferred_port(ClientConnection.CLIENT_PORTS[i]))
 	_row("Port", _port, "Port on which the plugin starts the Client when none is running.")
@@ -107,7 +107,7 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_log_level.item_selected.connect(plugin.set_log_level)
 	_row("Log Level", _log_level, "Log level for the plugin's output.")
 
-	_section("Providers", "Which provider tabs the panel shows.\nSaved in your editor settings — the A2G menu's check rows toggle the same settings.")
+	_section("Providers", "Which provider tabs the panel shows.\nSaved in your editor settings — the A2G menu's check rows toggle the same settings.", "TabBar")
 	for p in plugin.PROVIDERS:
 		var key := str(p.get("key", ""))
 		var title_p := str(p.get("title", key))
@@ -121,7 +121,16 @@ func setup(new_plugin: EditorPlugin) -> void:
 				else " Its catalog never fetches while off."])
 		_prov_checks[key] = check
 
-	_section("Assets2Godot", "Local index browser and the unified Assets tab.\nSaved in your editor settings and applies to all your projects.\nAlso in Editor Settings → Assets2Godot.")
+	_section("A2G panel", "The Assets2Godot panel itself — where it lives and how its tabs look.\nSaved in your editor settings. Also in Editor Settings → Assets2Godot.", "EditorDock")
+	_a2g_panel = _options(["Embedded (main screen)", "Docked"])
+	_a2g_panel.item_selected.connect(func(i): plugin.set_panel_mode(i))
+	_row("A2G panel", _a2g_panel, "Where the Assets2Godot panel opens.\nEmbedded keeps it inside its own main screen; Docked moves it into a native editor dock — the dock's ⋮ menu then offers dock position, floating and close, and the header button toggles the same setting.")
+	_a2g_tablogos = CheckBox.new()
+	_a2g_tablogos.text = "Show provider logos in the main tabs"
+	_a2g_tablogos.toggled.connect(plugin.set_tab_logos)
+	_row("Provider logos", _a2g_tablogos, "Marks BlendKit, Polyhaven and ambientCG tabs with their provider logo.\nOff keeps the tabs text-only like the editor's own — the A2G menu's 'Provider logos in tabs' toggles the same setting.")
+
+	_section("A2G file browser", "The index browser and its Assets view — how files list,\nhow big thumbs render, how much of the open scene it collects.\nSaved in your editor settings.", "FileList")
 	_a2g_view = _options(["Grid", "List"])
 	# The browser's own persistence key — a2g_browser reads/writes
 	# browser_display_mode; anything else would be a dead setting.
@@ -137,15 +146,8 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_a2g_files.text = "Show non-visual files by default"
 	_a2g_files.toggled.connect(func(on): _set_es("assets2godot/show_all_files", on))
 	_row("Show all files", _a2g_files, "Initial state of the Assets tab's 'Show all files' checkbox —\ntext files, configs and scripts that have no visual preview.")
-	_a2g_panel = _options(["Embedded (main screen)", "Docked"])
-	_a2g_panel.item_selected.connect(func(i): plugin.set_panel_mode(i))
-	_row("A2G panel", _a2g_panel, "Where the Assets2Godot panel opens.\nEmbedded keeps it inside its own main screen; Docked moves it into a native editor dock — the dock's ⋮ menu then offers dock position, floating and close, and the header button toggles the same setting.")
-	_a2g_tablogos = CheckBox.new()
-	_a2g_tablogos.text = "Show provider logos in the main tabs"
-	_a2g_tablogos.toggled.connect(plugin.set_tab_logos)
-	_row("Provider logos", _a2g_tablogos, "Marks BlendKit, Polyhaven and ambientCG tabs with their provider logo.\nOff keeps the tabs text-only like the editor's own — the A2G menu's 'Provider logos in tabs' toggles the same setting.")
 
-	_section("Download defaults", "Which option drag & drop, the quick-download tile and the details popup preselect for texture-bearing providers.\nProvider rows override the global default; 'Provider default' inherits it.\nAlso in Editor Settings → Assets2Godot.")
+	_section("A2G download defaults", "Which option drag & drop, the quick-download tile and the details popup preselect for texture-bearing providers.\nProvider rows override the global default; 'Provider default' inherits it.\nAlso in Editor Settings → Assets2Godot.", "AssetStore")
 	_tex_format = _options(["Auto (PNG when the asset has an opacity map)", "JPEG", "PNG"])
 	_tex_format.item_selected.connect(func(i): _set_es("assets2godot/texture_format", ["auto", "jpg", "png"][i]))
 	_row("Texture format", _tex_format, "Default map format for new texture downloads.\nAuto picks PNG when the asset ships an opacity map (alpha needs lossless edges) and JPEG otherwise — JPEG is ~3× smaller.\nPNG keeps mask edges lossless; JPEG still renders transparent through the alpha bake, just with softer/noisier cutout edges.")
@@ -187,11 +189,11 @@ func setup(new_plugin: EditorPlugin) -> void:
 		_apply_player_path())
 	add_child(_player_dialog)
 
-	_section("Tools", "External helpers optional features integrate with.\nSaved in your editor settings.")
+	_section("Tools", "External helpers optional features integrate with.\nSaved in your editor settings.", "Script")
 	_row("Substance Player", player_row, "Substance 3D Player location for ambientCG .sbsar assets.\nEmpty = auto-detect Creative Cloud / legacy installs (shown as placeholder).\nThe details popup's 'Open in Substance Player' works through the file association either way.")
 	_player_path.tooltip_text = player_row.tooltip_text
 
-	_section("Terrain defaults", "Values baked into ambientCG terrains at placement —\nexisting meshes keep what they were placed with.")
+	_section("Terrain defaults", "Values baked into ambientCG terrains at placement —\nexisting meshes keep what they were placed with.", "WorldEnvironment")
 	_terrain_extent = _spin(10, 50000, 10, "m")
 	_terrain_extent.value_changed.connect(func(v): _set_es(AcgTerrain.SETTING_EXTENT, v))
 	_row("Terrain extent", _terrain_extent, "XZ footprint baked into placed ambientCG terrains when no sibling OBJ gives real meters.\nAffects the next placement, not existing meshes.")
@@ -342,19 +344,31 @@ func _spin(min_v: float, max_v: float, step: float, suffix: String) -> SpinBox:
 	return spin
 
 
-func _section(text: String, tooltip: String) -> void:
+## Section header: icon + bold label in the left cell, empty spacer
+## in the right — same two-cell row the _row pairs occupy.
+func _section(text: String, tooltip: String, icon_name := "") -> void:
 	var edscale := EditorInterface.get_editor_scale()
-	for i in 2:
-		var label := Label.new()
-		if i == 0:
-			label.text = text
-			label.tooltip_text = tooltip
-			label.mouse_filter = Control.MOUSE_FILTER_PASS
-			label.add_theme_font_override("font", get_theme_font("bold", "EditorFonts"))
-		if _grid.get_child_count() > 0:
-			label.custom_minimum_size.y = 24 * edscale
-			label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
-		_grid.add_child(label)
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", int(6 * edscale))
+	var label := Label.new()
+	label.text = text
+	label.tooltip_text = tooltip
+	label.mouse_filter = Control.MOUSE_FILTER_PASS
+	label.add_theme_font_override("font", get_theme_font("bold", "EditorFonts"))
+	if not icon_name.is_empty():
+		var icon := TextureRect.new()
+		icon.texture = get_theme_icon(icon_name, "EditorIcons")
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.custom_minimum_size = Vector2(16, 16) * edscale
+		icon.tooltip_text = tooltip
+		icon.mouse_filter = Control.MOUSE_FILTER_PASS
+		head.add_child(icon)
+	head.add_child(label)
+	if _grid.get_child_count() > 0:
+		head.custom_minimum_size.y = 24 * edscale
+		head.alignment = BoxContainer.ALIGNMENT_END
+	_grid.add_child(head)
+	_grid.add_child(Control.new())
 
 
 func _row(text: String, control: Control, tooltip: String) -> void:
