@@ -211,6 +211,14 @@ func _attach_editor_panel() -> void:
 		if p not in cands:
 			cands.append(p)
 	for p in cands:
+		# The logo shares the a2g_owner meta — without this skip the
+		# sweep would adopt it as a panel. And a queued panel is a
+		# corpse: the root-gate frees an inactive tab's panel while it
+		# still sits in the surface for a frame — re-adopting it here
+		# would "park" a dying Control.
+		if p == _editor_logo or p.is_in_group(LOGO_GROUP) \
+				or p.is_queued_for_deletion():
+			continue
 		if p == _editor_panel:
 			p.set_meta(&"a2g_owner", self)
 			p.add_to_group(PANEL_GROUP)
@@ -256,12 +264,29 @@ func _attach_editor_panel() -> void:
 			_editor_logo.queue_free()
 			_editor_logo = null
 		return
-	# Logo reaper — same orphan story as the panel, kept in its own
-	# group so it never trips the panel's structural fingerprint.
+	# Logo reaper — same ownership protocol as the panel sweep: a
+	# live foreign owner keeps its logo, dead or detached orphans go,
+	# and a lost member re-adopts a same-owned straggler.
 	for l in get_tree().get_nodes_in_group(LOGO_GROUP):
-		if l != _editor_logo:
+		if l == _editor_logo or l.is_queued_for_deletion():
+			continue
+		var lo: Variant = l.get_meta(&"a2g_owner") \
+				if l.has_meta(&"a2g_owner") else null
+		if lo == self:
+			if is_instance_valid(_editor_logo):
+				_editor_logo.queue_free()
+			_editor_logo = l
+		elif is_instance_valid(lo) and lo is Node \
+				and (lo as Node).is_inside_tree() \
+				and not (self == root and lo != root):
+			continue
+		else:
 			l.queue_free()
-	if not is_instance_valid(_editor_panel):
+	# is_instance_valid alone is not enough: a foreign sweep outranks
+	# an inactive tab's panel via queue_free but cannot null this
+	# instance's member — queued is not yet freed, so re-instantiate.
+	if not is_instance_valid(_editor_panel) \
+			or _editor_panel.is_queued_for_deletion():
 		_editor_panel = ResourceLoader.load(PANEL_SCENE_PATH, "",
 				ResourceLoader.CACHE_MODE_REPLACE).instantiate()
 		_editor_panel.name = PANEL_NAME
@@ -274,7 +299,8 @@ func _attach_editor_panel() -> void:
 			_editor_panel.reparent(surface)
 		else:
 			surface.add_child(_editor_panel)
-	if not is_instance_valid(_editor_logo):
+	if not is_instance_valid(_editor_logo) \
+			or _editor_logo.is_queued_for_deletion():
 		_editor_logo = _spawn_logo_button()
 		_editor_logo.name = "A2GPreviewLogo"
 		_editor_logo.set_meta(&"a2g_owner", self)

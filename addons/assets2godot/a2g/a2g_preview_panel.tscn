@@ -22,7 +22,9 @@ theme_override_constants/margin_bottom = 10
 [node name="VBox" type="VBoxContainer" parent="Margin"]
 theme_override_constants/separation = 6
 
-[node name="Title" type="Label" parent="Margin/VBox"]
+[node name="Title" type="CheckBox" parent="Margin/VBox"]
+button_pressed = true
+tooltip_text = "Hide the A2G preview panel — a small logo button stays bottom-left to bring it back."
 text = "A2G PREVIEW"
 
 [node name="Sep" type="HSeparator" parent="Margin/VBox"]
