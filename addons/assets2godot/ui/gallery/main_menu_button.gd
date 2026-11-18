@@ -67,9 +67,13 @@ func setup(new_plugin: EditorPlugin) -> void:
 	add_child(_menu)
 	_menu.id_pressed.connect(_on_id_pressed)
 	_menu.popup_hide.connect(func(): set_pressed_no_signal(false))
-	_settings = SettingsDialog.new()
-	add_child(_settings)
-	_settings.setup(plugin)
+	# The one shared Settings dialog — the A2G menu builds it if we
+	# didn't; both menus open the same surface.
+	if plugin.settings_dialog == null:
+		plugin.settings_dialog = SettingsDialog.new()
+		EditorInterface.get_base_control().add_child(plugin.settings_dialog)
+		plugin.settings_dialog.setup(plugin)
+	_settings = plugin.settings_dialog
 	toggle_mode = true
 	toggled.connect(_on_toggled)
 	plugin.auth.changed.connect(refresh)

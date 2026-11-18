@@ -162,6 +162,10 @@ var _ctx_scene: EditorContextMenuPlugin
 ## because the class only exists on Godot 4.6+ (ClassDB instantiation
 ## keeps this plugin parsing on older versions).
 var _a2g_dock_shell: Variant
+## One settings dialog for the whole plugin — the A2G menu and the
+## BlendKit menu both open it; whoever builds first parents it to the
+## editor's base control, the other just pops it.
+var settings_dialog: AcceptDialog
 var _a2g_placeholder: Control
 var _dock_button: Button
 var _panel_docked := false
@@ -277,6 +281,11 @@ func _exit_tree() -> void:
 	if _a2g_placeholder != null:
 		_a2g_placeholder.queue_free()
 		_a2g_placeholder = null
+	# The shared settings dialog lives on the editor's base control —
+	# it outlives the plugin's own children unless freed here.
+	if settings_dialog != null:
+		settings_dialog.queue_free()
+		settings_dialog = null
 	# The children go with the plugin; the panes live in the main screen.
 	if main_screen:
 		main_screen.queue_free()

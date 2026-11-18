@@ -80,12 +80,13 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_fmt_menu.name = "FmtMenu"
 	_fmt_menu.id_pressed.connect(func(id): _set_es(SETTING_TEX_FORMAT, TEX_FORMATS[id]))
 	_menu.add_child(_fmt_menu)
-	# The same Settings dialog the BlendKit menu opens — one settings
-	# surface for the whole plugin, retitled for this menu's scope.
-	_settings = SettingsDialog.new()
-	add_child(_settings)
-	_settings.setup(plugin)
-	_settings.title = "Assets2Godot Settings"
+	# The one shared Settings dialog — the BlendKit menu builds it if we
+	# didn't; both menus open the same surface.
+	if plugin.settings_dialog == null:
+		plugin.settings_dialog = SettingsDialog.new()
+		EditorInterface.get_base_control().add_child(plugin.settings_dialog)
+		plugin.settings_dialog.setup(plugin)
+	_settings = plugin.settings_dialog
 	toggle_mode = true
 	toggled.connect(_on_toggled)
 
@@ -148,26 +149,30 @@ func _fill_menu() -> void:
 		_view_menu.add_radio_check_item(VIEW_MODES[i], i)
 		_view_menu.set_item_checked(i, int(_es(SETTING_VIEW, 0)) == i)
 	_menu.add_submenu_item("Browser view", _view_menu.name)
+	_menu.set_item_icon(-1, get_theme_icon("FileList", "EditorIcons"))
 	_menu.set_item_tooltip(-1, "Gallery tiles or a compact list — shared with the Settings dialog (applies on next browser load).")
 	for i in THUMB_SIZES.size():
 		_thumb_menu.add_radio_check_item("%d px" % THUMB_SIZES[i], i)
 		_thumb_menu.set_item_checked(i, _es(SETTING_THUMB, 256) == THUMB_SIZES[i])
 	_menu.add_submenu_item("Thumbnail size", _thumb_menu.name)
+	_menu.set_item_icon(-1, get_theme_icon("ImageTexture", "EditorIcons"))
 	_menu.set_item_tooltip(-1, "Render size for thumbnails of files outside res:// — also in Settings.")
 	for i in SCENE_CAPS.size():
 		_cap_menu.add_radio_check_item(str(SCENE_CAPS[i]), i)
 		_cap_menu.set_item_checked(i, _es(SETTING_CAP, 300) == SCENE_CAPS[i])
 	_menu.add_submenu_item("Scene resources cap", _cap_menu.name)
+	_menu.set_item_icon(-1, get_theme_icon("NodeInfo", "EditorIcons"))
 	_menu.set_item_tooltip(-1, "Max resources collected from the open scene for the Assets view.")
 	for i in TEX_FORMATS.size():
 		var label: String = "Auto" if TEX_FORMATS[i] == "auto" else TEX_FORMATS[i].to_upper()
 		_fmt_menu.add_radio_check_item(label, i)
 		_fmt_menu.set_item_checked(i, _es(SETTING_TEX_FORMAT, "auto") == TEX_FORMATS[i])
 	_menu.add_submenu_item("Texture format", _fmt_menu.name)
+	_menu.set_item_icon(-1, get_theme_icon("AssetStore", "EditorIcons"))
 	_menu.set_item_tooltip(-1, "Default format for texture downloads — Auto picks PNG for opacity maps. Per-provider overrides live in Settings.")
 	# Icon check row like the provider switches above — a plain check
 	# item renders its box offset from the icon_check rows' boxes.
-	_menu.add_icon_check_item(get_theme_icon("FileList", "EditorIcons"), "Show all files", Item.SHOW_FILES)
+	_menu.add_icon_check_item(get_theme_icon("File", "EditorIcons"), "Show all files", Item.SHOW_FILES)
 	_menu.set_item_checked(-1, bool(_es(SETTING_FILES, false)))
 	_menu.set_item_tooltip(-1, "List text files, configs and scripts in the Assets view too.")
 	# The header's dock toggle as a menu check — same setting, same
