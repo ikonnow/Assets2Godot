@@ -382,9 +382,13 @@ func _collect_visuals() -> Array[Node3D]:
 	while not stack.is_empty():
 		var n := stack.pop_back()
 		var n3d := n as Node3D
-		if n3d != null and (n3d is VisualInstance3D or n3d.has_method("get_aabb")):
+		if n3d != null and not n3d.has_meta(&"a2g_no_drop") \
+				and (n3d is VisualInstance3D or n3d.has_method("get_aabb")):
 			out.append(n3d)
-		stack.append_array(n.get_children())
+		# include_internal: the injected preview stage lives as
+		# INTERNAL_MODE_BACK children — without this its drop
+		# surfaces are invisible to picking in user scenes.
+		stack.append_array(n.get_children(true))
 	return out
 
 
@@ -415,10 +419,11 @@ func _ray_visuals(origin: Vector3, far: Vector3, current_best: float) -> Diction
 
 ## The MeshInstance3D an assign drop would touch: the hit itself, or a
 ## collider's/ancestor's subtree — meshes nested under a StaticBody3D
-## are the common shape.
+## are the common shape. `a2g_no_drop` opts a mesh out (the preview's
+## logo mark is branding, not a material test surface).
 func _assign_target(node: Variant) -> MeshInstance3D:
 	if node is MeshInstance3D:
-		return node
+		return null if node.has_meta(&"a2g_no_drop") else node
 	if node is Node3D:
 		var mi := _mesh_in_subtree(node)
 		if mi != null:
@@ -433,7 +438,7 @@ func _mesh_in_subtree(root: Node) -> MeshInstance3D:
 	var stack: Array[Node] = [root]
 	while not stack.is_empty():
 		var n := stack.pop_back()
-		if n is MeshInstance3D:
+		if n is MeshInstance3D and not n.has_meta(&"a2g_no_drop"):
 			return n
 		stack.append_array(n.get_children())
 	return null

@@ -131,6 +131,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.058, 0)
 mesh = SubResource("PlaneMesh_mark")
 surface_material_override/0 = SubResource("StandardMaterial3D_mark")
 metadata/_edit_lock_ = true
+metadata/a2g_no_drop = true
 
 [node name="DropTargets" type="Node3D" parent="."]
 
