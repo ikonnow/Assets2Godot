@@ -5,6 +5,43 @@
 This fork continues the Blendkit for Godot lineage under the Assets2Godot
 name. Entries below `0.8.0` are upstream history, kept for reference.
 
+## 0.9.0 - 2026-11-18
+
+### Added
+
+- **A2G preview stage**: an opt-in stage lives inside the 3D viewport —
+  a drop pad, sun and sky you can place real assets on. The stage panel
+  floats over the viewport or docks into the editor; a corner logo
+  re-opens it when collapsed. Placed models land on the pad as editable
+  scene instances, selected and expanded in the Scene dock.
+- **Solo view + zones**: checkbox-framed stage zones fly the camera to
+  the pad, the sun gizmo (clickable at 5 m) or the full set.
+- **Preview lighting** toggle on injected stages: they start on the
+  host's own lighting — the stage's environment and sun only attach
+  when asked, keeping your scene's look untouched by default.
+- **Detail popups**: zoom preview on hover, alpha-bake for transparent
+  textures, Substance Player routing for `.sbsar` archives, and
+  per-provider download preferences.
+- **Settings dialog**: scope-named sections (Providers, A2G panel,
+  download defaults, Tools, Terrain, Assets2Godot Files, BlendKit) with
+  provider enable toggles and honest per-scope labels; the ⋮ menus
+  share one branded separator style and group items to match. Checking
+  for updates keeps the menu open and reports inline.
+
+### Fixed
+
+- **HDR panoramas decode raw** — the sky skips the lossy BC6H import
+  path; AgX + `CameraAttributes` exposure gives faithful lookdev under
+  Forward+.
+- **Compatibility renderer skies**: `gl_compatibility` can't carry HDR,
+  so skies tonemap to LDR at load there — the panorama finally looks
+  like the provider's own preview instead of a dark, clipped mess.
+- **Scene drop**: `a2g_no_drop` keeps the logo mark out of drop
+  picking, HDRIs ghost a proper sky dome, and a stall watchdog catches
+  wedged downloads.
+- Docked panel defaults to the bottom-center slot, activates on add
+  and jumps to the 3D screen so the preview is immediately in view.
+
 ## 0.8.2 - 2026-11-11
 
 ### Added
