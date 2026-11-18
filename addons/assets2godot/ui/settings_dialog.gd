@@ -62,51 +62,6 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_grid.add_theme_constant_override("v_separation", int(6 * edscale))
 	add_child(_grid)
 
-	_section("BlendKit project", "The BlendKit gallery's own settings — saved in project.godot and\nshared with everyone working on this project. Also in Project Settings → Blendkit.")
-	_download_dir = LineEdit.new()
-	_download_dir.text_submitted.connect(func(_t): _apply_download_dir())
-	_download_dir.focus_exited.connect(_apply_download_dir)
-	_download_dir.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	# Like EditorPropertyPath in Project Settings: path and a browse button.
-	var browse := Button.new()
-	browse.icon = get_theme_icon("FolderBrowse", "EditorIcons")
-	# Godot 4.6+, older versions fall back to the plain Button style.
-	browse.theme_type_variation = "EditorInspectorButton"
-	browse.tooltip_text = "Choose the download folder."
-	browse.pressed.connect(_browse_download_dir)
-	var download_row := HBoxContainer.new()
-	download_row.add_child(_download_dir)
-	download_row.add_child(browse)
-	_download_dir_dialog = EditorFileDialog.new()
-	_download_dir_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_DIR
-	_download_dir_dialog.access = EditorFileDialog.ACCESS_RESOURCES
-	_download_dir_dialog.dir_selected.connect(_on_download_dir_selected)
-	add_child(_download_dir_dialog)
-	_row("BlendKit download dir", download_row, "Directory BlendKit downloads land in (project setting, shared with the team).\nPolyhaven and ambientCG pick their own roots in their tab's folder button.")
-	_download_dir.tooltip_text = download_row.tooltip_text
-	_blend_import = _dialog_button()
-	_blend_import.pressed.connect(func():
-		hide()
-		_blender_import_dialog.popup_centered())
-	_row("Blender Import", _blend_import, "Whether Godot imports .blend files, and the Blender it imports them with.\nClick to change them.")
-	_model_format = _options(plugin.MODEL_FORMATS.map(func(f): return f[1]))
-	_model_format.item_selected.connect(func(i): plugin.set_model_format(plugin.MODEL_FORMATS[i][0]))
-	_row("Model Format", _model_format, "Blender (.blend) downloads .blend files at the selected Resolution, which Godot imports only through Blender.\nglTF (.glb) downloads .glb files exported by Blendkit, which Godot imports directly. Only some models have one, so the Blendkit tab shows only those, and other models fall back to .blend at the selected Resolution.\nExperimental — the bundled Client can crash on these downloads.")
-	_resolution = _options(plugin.RESOLUTIONS.map(func(r): return r[1]))
-	_resolution.item_selected.connect(func(i): plugin.set_resolution(plugin.RESOLUTIONS[i][0]))
-	_row("Resolution", _resolution, "Texture resolution for .blend files, also used when glTF is unavailable. Auto downloads 2K.")
-	_uuid_names = _options(plugin.UUID_NAMES.map(func(n): return n[1]))
-	_uuid_names.item_selected.connect(func(i): plugin.set_uuid_names(plugin.UUID_NAMES[i][0]))
-	_row("UUIDs in Names", _uuid_names, "How downloaded folders and files are named, for new downloads.\nFull: with the whole asset and file UUIDs, like chair_1a2b3c4d-…/chair_gltf_godot_5e6f7a8b-….glb.\nShort: with their first 8 characters, like chair_1a2b3c4d/chair_gltf_godot_5e6f7a8b.glb.\nStrip: without them, like chair/chair_gltf_godot.glb. Assets with the same name get a short UUID. A newer version of an asset replaces the older one in its folder.")
-
-	_section("BlendKit client", "The vendored Client daemon the BlendKit gallery talks to.\nSaved in your editor settings for all projects. Also in Editor Settings → Blendkit.")
-	_port = _options(ClientConnection.CLIENT_PORTS)
-	_port.item_selected.connect(func(i): plugin.set_preferred_port(ClientConnection.CLIENT_PORTS[i]))
-	_row("Port", _port, "Port on which the plugin starts the Client when none is running.")
-	_log_level = _options(plugin.LogLevel.keys())
-	_log_level.item_selected.connect(plugin.set_log_level)
-	_row("Log Level", _log_level, "Log level for the plugin's output.")
-
 	_section("Providers", "Which provider tabs the panel shows.\nSaved in your editor settings — the A2G menu's check rows toggle the same settings.")
 	for p in plugin.PROVIDERS:
 		var key := str(p.get("key", ""))
@@ -203,6 +158,52 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_a2g_files.text = "Show non-visual files by default"
 	_a2g_files.toggled.connect(func(on): _set_es("assets2godot/show_all_files", on))
 	_row("Show all files", _a2g_files, "Initial state of the Assets tab's 'Show all files' checkbox —\ntext files, configs and scripts that have no visual preview.")
+
+
+	_section("BlendKit project", "The BlendKit gallery's own settings — saved in project.godot and\nshared with everyone working on this project. Also in Project Settings → Blendkit.")
+	_download_dir = LineEdit.new()
+	_download_dir.text_submitted.connect(func(_t): _apply_download_dir())
+	_download_dir.focus_exited.connect(_apply_download_dir)
+	_download_dir.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Like EditorPropertyPath in Project Settings: path and a browse button.
+	var browse := Button.new()
+	browse.icon = get_theme_icon("FolderBrowse", "EditorIcons")
+	# Godot 4.6+, older versions fall back to the plain Button style.
+	browse.theme_type_variation = "EditorInspectorButton"
+	browse.tooltip_text = "Choose the download folder."
+	browse.pressed.connect(_browse_download_dir)
+	var download_row := HBoxContainer.new()
+	download_row.add_child(_download_dir)
+	download_row.add_child(browse)
+	_download_dir_dialog = EditorFileDialog.new()
+	_download_dir_dialog.file_mode = EditorFileDialog.FILE_MODE_OPEN_DIR
+	_download_dir_dialog.access = EditorFileDialog.ACCESS_RESOURCES
+	_download_dir_dialog.dir_selected.connect(_on_download_dir_selected)
+	add_child(_download_dir_dialog)
+	_row("BlendKit download dir", download_row, "Directory BlendKit downloads land in (project setting, shared with the team).\nPolyhaven and ambientCG pick their own roots in their tab's folder button.")
+	_download_dir.tooltip_text = download_row.tooltip_text
+	_blend_import = _dialog_button()
+	_blend_import.pressed.connect(func():
+		hide()
+		_blender_import_dialog.popup_centered())
+	_row("Blender Import", _blend_import, "Whether Godot imports .blend files, and the Blender it imports them with.\nClick to change them.")
+	_model_format = _options(plugin.MODEL_FORMATS.map(func(f): return f[1]))
+	_model_format.item_selected.connect(func(i): plugin.set_model_format(plugin.MODEL_FORMATS[i][0]))
+	_row("Model Format", _model_format, "Blender (.blend) downloads .blend files at the selected Resolution, which Godot imports only through Blender.\nglTF (.glb) downloads .glb files exported by Blendkit, which Godot imports directly. Only some models have one, so the Blendkit tab shows only those, and other models fall back to .blend at the selected Resolution.\nExperimental — the bundled Client can crash on these downloads.")
+	_resolution = _options(plugin.RESOLUTIONS.map(func(r): return r[1]))
+	_resolution.item_selected.connect(func(i): plugin.set_resolution(plugin.RESOLUTIONS[i][0]))
+	_row("Resolution", _resolution, "Texture resolution for .blend files, also used when glTF is unavailable. Auto downloads 2K.")
+	_uuid_names = _options(plugin.UUID_NAMES.map(func(n): return n[1]))
+	_uuid_names.item_selected.connect(func(i): plugin.set_uuid_names(plugin.UUID_NAMES[i][0]))
+	_row("UUIDs in Names", _uuid_names, "How downloaded folders and files are named, for new downloads.\nFull: with the whole asset and file UUIDs, like chair_1a2b3c4d-…/chair_gltf_godot_5e6f7a8b-….glb.\nShort: with their first 8 characters, like chair_1a2b3c4d/chair_gltf_godot_5e6f7a8b.glb.\nStrip: without them, like chair/chair_gltf_godot.glb. Assets with the same name get a short UUID. A newer version of an asset replaces the older one in its folder.")
+
+	_section("BlendKit client", "The vendored Client daemon the BlendKit gallery talks to.\nSaved in your editor settings for all projects. Also in Editor Settings → Blendkit.")
+	_port = _options(ClientConnection.CLIENT_PORTS)
+	_port.item_selected.connect(func(i): plugin.set_preferred_port(ClientConnection.CLIENT_PORTS[i]))
+	_row("Port", _port, "Port on which the plugin starts the Client when none is running.")
+	_log_level = _options(plugin.LogLevel.keys())
+	_log_level.item_selected.connect(plugin.set_log_level)
+	_row("Log Level", _log_level, "Log level for the plugin's output.")
 
 	# A sibling, as a child window would hide with Settings.
 	_blender_import_dialog = BlenderImportDialog.new()
@@ -344,15 +345,22 @@ func _spin(min_v: float, max_v: float, step: float, suffix: String) -> SpinBox:
 	return spin
 
 
+## Section headline: caps + emboldened + letter-spaced — the same
+## FontVariation recipe the preview panel's headlines use (A2G
+## branding), wrapped around the theme's own default font.
 func _section(text: String, tooltip: String) -> void:
 	var edscale := EditorInterface.get_editor_scale()
 	for i in 2:
 		var label := Label.new()
 		if i == 0:
-			label.text = text
+			label.text = text.to_upper()
 			label.tooltip_text = tooltip
 			label.mouse_filter = Control.MOUSE_FILTER_PASS
-			label.add_theme_font_override("font", get_theme_font("bold", "EditorFonts"))
+			var fv := FontVariation.new()
+			fv.base_font = label.get_theme_default_font()
+			fv.variation_embolden = 0.7
+			fv.spacing_glyph = 2
+			label.add_theme_font_override("font", fv)
 		if _grid.get_child_count() > 0:
 			label.custom_minimum_size.y = 24 * edscale
 			label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM

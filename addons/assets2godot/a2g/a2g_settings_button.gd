@@ -138,13 +138,7 @@ func _fill_menu() -> void:
 		_menu.set_item_tooltip(-1, "Show the %s tab.%s" % [p.get("title", key),
 			" The Client keeps running — the A2G index needs it." if daemon else \
 			" Its catalog never fetches while off."])
-	# Opt-in provider marks inside the tabs themselves — off keeps the
-	# strip text-only like the editor's own tabs.
-	_menu.add_icon_check_item(get_theme_icon("TabBar", "EditorIcons"),
-		"Provider logos in tabs", Item.TAB_LOGOS)
-	_menu.set_item_checked(-1, plugin.tab_logos_enabled())
-	_menu.set_item_tooltip(-1, "Show each provider's logo in its main tab — off keeps tabs text-only.")
-	_menu.add_separator("Assets2Godot")
+	_menu.add_separator("Assets2Godot Files")
 	for i in VIEW_MODES.size():
 		_view_menu.add_radio_check_item(VIEW_MODES[i], i)
 		_view_menu.set_item_checked(i, int(_es(SETTING_VIEW, 0)) == i)
@@ -167,14 +161,21 @@ func _fill_menu() -> void:
 		var label: String = "Auto" if TEX_FORMATS[i] == "auto" else TEX_FORMATS[i].to_upper()
 		_fmt_menu.add_radio_check_item(label, i)
 		_fmt_menu.set_item_checked(i, _es(SETTING_TEX_FORMAT, "auto") == TEX_FORMATS[i])
-	_menu.add_submenu_item("Texture format", _fmt_menu.name)
-	_menu.set_item_icon(-1, get_theme_icon("AssetStore", "EditorIcons"))
-	_menu.set_item_tooltip(-1, "Default format for texture downloads — Auto picks PNG for opacity maps. Per-provider overrides live in Settings.")
 	# Icon check row like the provider switches above — a plain check
 	# item renders its box offset from the icon_check rows' boxes.
 	_menu.add_icon_check_item(get_theme_icon("File", "EditorIcons"), "Show all files", Item.SHOW_FILES)
 	_menu.set_item_checked(-1, bool(_es(SETTING_FILES, false)))
 	_menu.set_item_tooltip(-1, "List text files, configs and scripts in the Assets view too.")
+	_menu.add_separator("Assets2Godot")
+	_menu.add_submenu_item("Texture format", _fmt_menu.name)
+	_menu.set_item_icon(-1, get_theme_icon("AssetStore", "EditorIcons"))
+	_menu.set_item_tooltip(-1, "Default format for texture downloads — Auto picks PNG for opacity maps. Per-provider overrides live in Settings.")
+	# Opt-in provider marks inside the tabs — a panel feature, so it
+	# sits with the dock/preview switches under Assets2Godot.
+	_menu.add_icon_check_item(get_theme_icon("TabBar", "EditorIcons"),
+		"Provider logos in tabs", Item.TAB_LOGOS)
+	_menu.set_item_checked(-1, plugin.tab_logos_enabled())
+	_menu.set_item_tooltip(-1, "Show each provider's logo in its main tab — off keeps tabs text-only.")
 	# The header's dock toggle as a menu check — same setting, same
 	# immediate reparent; EditorDock is the icon the header button uses
 	# (GuiTabUnfloat doesn't exist in the editor's icon set).
