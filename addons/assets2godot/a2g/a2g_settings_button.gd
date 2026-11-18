@@ -179,7 +179,7 @@ func _fill_menu() -> void:
 	_menu.add_icon_check_item(get_theme_icon("File", "EditorIcons"), "Show all files", Item.SHOW_FILES)
 	_menu.set_item_checked(-1, bool(_es(SETTING_FILES, false)))
 	_menu.set_item_tooltip(-1, "List text files, configs and scripts in the Assets view too.")
-	_menu.add_separator("A2G")
+	_menu.add_separator("A2G SETTINGS")
 	_menu.add_submenu_item("Texture format", _fmt_menu.name)
 	_menu.set_item_icon(-1, get_theme_icon("AssetStore", "EditorIcons"))
 	_menu.set_item_tooltip(-1, "Default format for texture downloads — Auto picks PNG for opacity maps. Per-provider overrides live in Settings.")
