@@ -1165,6 +1165,7 @@ func _commit_hdri(path: String) -> void:
 		var env := Environment.new()
 		env.sky = sky
 		env.background_mode = Environment.BG_SKY
+		env.tonemap_mode = Environment.TONE_MAPPER_AGX
 		we = WorldEnvironment.new()
 		we.name = "WorldEnvironment"
 		we.environment = env
@@ -1180,6 +1181,7 @@ func _commit_hdri(path: String) -> void:
 			env = Environment.new()
 			env.sky = sky
 			env.background_mode = Environment.BG_SKY
+			env.tonemap_mode = Environment.TONE_MAPPER_AGX
 			ur.add_do_property(we, "environment", env)
 			ur.add_do_reference(env)
 			ur.add_undo_property(we, "environment", null)

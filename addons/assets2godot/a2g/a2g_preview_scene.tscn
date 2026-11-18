@@ -10,14 +10,18 @@
 resource_local_to_scene = true
 sky_material = SubResource("ProceduralSkyMaterial_sky")
 
+[sub_resource type="CameraAttributesPractical" id="CameraAttributes_exposure"]
+exposure_multiplier = 1.5
+
 [sub_resource type="Environment" id="Environment_env"]
 resource_local_to_scene = true
 background_mode = 2
 sky = SubResource("Sky_sky")
 ambient_light_source = 3
 reflected_light_source = 2
-tonemap_mode = 3
+tonemap_mode = 4
 tonemap_exposure = 1.0
+camera_attributes = SubResource("CameraAttributes_exposure")
 
 [sub_resource type="PlaneMesh" id="PlaneMesh_ground"]
 size = Vector2(60, 60)
