@@ -58,6 +58,10 @@ func setup(new_plugin: EditorPlugin) -> void:
 
 	_menu = PopupMenu.new()
 	add_child(_menu)
+	# Toggle rows stay open — flipping several providers or watching the
+	# update row land needs the menu alive; action rows hide it themselves.
+	_menu.hide_on_item_selection = false
+	_menu.hide_on_checkable_item_selection = false
 	_menu.id_pressed.connect(_on_id_pressed)
 	_menu.popup_hide.connect(func(): set_pressed_no_signal(false))
 	_view_menu = PopupMenu.new()
@@ -197,9 +201,15 @@ func _fill_menu() -> void:
 
 
 ## The release-check result row — nothing before the first check, a
-## disabled status after, or a clickable "Update available" link.
+## "Checking…" placeholder while the request is out, then a disabled
+## status or a clickable "Update available" link.
 func _fill_update_row() -> void:
 	if _update.is_empty():
+		return
+	if _update.has("pending"):
+		_menu.add_icon_item(get_theme_icon("Timer", "EditorIcons"),
+			"Checking for updates…", Item.UPDATE_STATUS)
+		_menu.set_item_disabled(-1, true)
 		return
 	var latest := str(_update.get("latest", ""))
 	if latest.is_empty():
@@ -241,25 +251,35 @@ func _on_id_pressed(id: int) -> void:
 		Item.PREVIEW_SCENE:
 			plugin.set_preview_scene(not plugin.preview_scene_enabled())
 		Item.OPEN_DIR:
+			_menu.hide()
 			EditorInterface.get_file_system_dock().navigate_to_path(A2G_DIR)
 		Item.SETTINGS:
+			_menu.hide()
 			_settings.popup_centered()
 		Item.UPDATE:
 			_check_updates()
 		Item.UPDATE_STATUS:
+			_menu.hide()
 			var url := str(_update.get("url", ""))
 			if not url.is_empty():
 				OS.shell_open(url)
 		Item.SOURCES:
+			_menu.hide()
 			OS.shell_open(plugin.SOURCES_URL)
 		Item.ISSUES:
+			_menu.hide()
 			OS.shell_open(plugin.ISSUES_URL)
 
 
 ## Queries the repo's latest release once per menu open until answered —
 ## the row lands via _fill_menu on the next open or a manual re-check.
 func _check_updates() -> void:
-	_update = {}
+	_update = {"pending": true}
+	# The menu stays open for this item — show the pending row right
+	# away so the click visibly registered.
+	if _menu.visible:
+		_fill_menu()
+		_menu.reset_size()
 	var req := HTTPRequest.new()
 	req.timeout = 15.0
 	(plugin if plugin != null else self).add_child(req)

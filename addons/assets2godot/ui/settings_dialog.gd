@@ -130,23 +130,6 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_a2g_tablogos.toggled.connect(plugin.set_tab_logos)
 	_row("Provider logos", _a2g_tablogos, "Marks BlendKit, Polyhaven and ambientCG tabs with their provider logo.\nOff keeps the tabs text-only like the editor's own — the A2G menu's 'Provider logos in tabs' toggles the same setting.")
 
-	_section("A2G file browser", "The index browser and its Assets view — how files list,\nhow big thumbs render, how much of the open scene it collects.\nSaved in your editor settings.", "FileList")
-	_a2g_view = _options(["Grid", "List"])
-	# The browser's own persistence key — a2g_browser reads/writes
-	# browser_display_mode; anything else would be a dead setting.
-	_a2g_view.item_selected.connect(func(i): _set_es("assets2godot/browser_display_mode", i))
-	_row("Browser view", _a2g_view, "How the Assets2Godot index browser shows assets: gallery tiles or a compact list.\nThe browser toolbar's list/tile button changes the same setting.")
-	_a2g_thumb = _options(["128", "256", "512"])
-	_a2g_thumb.item_selected.connect(func(i): _set_es("assets2godot/thumb_size", [128, 256, 512][i]))
-	_row("Thumb size", _a2g_thumb, "Render size for thumbnails of files outside res://.\nApplies to thumbnails rendered after the change.")
-	_a2g_cap = _options(["50", "150", "300", "600", "1000"])
-	_a2g_cap.item_selected.connect(func(i): _set_es("assets2godot/scene_resource_cap", [50, 150, 300, 600, 1000][i]))
-	_row("Scene resources cap", _a2g_cap, "Maximum resources collected from the open scene for the Assets tab.\nHigher values cover bigger scenes at a slower collect.")
-	_a2g_files = CheckBox.new()
-	_a2g_files.text = "Show non-visual files by default"
-	_a2g_files.toggled.connect(func(on): _set_es("assets2godot/show_all_files", on))
-	_row("Show all files", _a2g_files, "Initial state of the Assets tab's 'Show all files' checkbox —\ntext files, configs and scripts that have no visual preview.")
-
 	_section("A2G download defaults", "Which option drag & drop, the quick-download tile and the details popup preselect for texture-bearing providers.\nProvider rows override the global default; 'Provider default' inherits it.\nAlso in Editor Settings → Assets2Godot.", "AssetStore")
 	_tex_format = _options(["Auto (PNG when the asset has an opacity map)", "JPEG", "PNG"])
 	_tex_format.item_selected.connect(func(i): _set_es("assets2godot/texture_format", ["auto", "jpg", "png"][i]))
@@ -203,6 +186,23 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_terrain_res = _options(["129", "257", "513", "1025"])
 	_terrain_res.item_selected.connect(func(i): _set_es(AcgTerrain.SETTING_RES, int(_terrain_res.get_item_text(i))))
 	_row("Terrain grid", _terrain_res, "Vertex grid the heightmap decimates to for placed terrains — 257 keeps ~66k verts, higher costs memory for detail the heightmap may not have.")
+
+	_section("Assets2Godot file browser", "The local file browser — how files list, how big thumbs render,\nhow much of the open scene it collects. Saved in your editor settings.\nAlso in Editor Settings → Assets2Godot.", "FileList")
+	_a2g_view = _options(["Grid", "List"])
+	# The browser's own persistence key — a2g_browser reads/writes
+	# browser_display_mode; anything else would be a dead setting.
+	_a2g_view.item_selected.connect(func(i): _set_es("assets2godot/browser_display_mode", i))
+	_row("Browser view", _a2g_view, "How the Assets2Godot file browser shows assets: gallery tiles or a compact list.\nThe browser toolbar's list/tile button changes the same setting.")
+	_a2g_thumb = _options(["128", "256", "512"])
+	_a2g_thumb.item_selected.connect(func(i): _set_es("assets2godot/thumb_size", [128, 256, 512][i]))
+	_row("Thumb size", _a2g_thumb, "Render size for thumbnails of files outside res://.\nApplies to thumbnails rendered after the change.")
+	_a2g_cap = _options(["50", "150", "300", "600", "1000"])
+	_a2g_cap.item_selected.connect(func(i): _set_es("assets2godot/scene_resource_cap", [50, 150, 300, 600, 1000][i]))
+	_row("Scene resources cap", _a2g_cap, "Maximum resources collected from the open scene for the Assets tab.\nHigher values cover bigger scenes at a slower collect.")
+	_a2g_files = CheckBox.new()
+	_a2g_files.text = "Show non-visual files by default"
+	_a2g_files.toggled.connect(func(on): _set_es("assets2godot/show_all_files", on))
+	_row("Show all files", _a2g_files, "Initial state of the Assets tab's 'Show all files' checkbox —\ntext files, configs and scripts that have no visual preview.")
 
 	# A sibling, as a child window would hide with Settings.
 	_blender_import_dialog = BlenderImportDialog.new()
