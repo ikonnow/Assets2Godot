@@ -159,7 +159,15 @@ static func _card_drag_data(_at: Vector2, item: Control) -> Variant:
 	if path.begins_with("res://"):
 		data = {"type": "files", "files": [path]}
 	elif str(payload.get("remote_slug", "")) != "":
-		data = payload.duplicate()
+		# A downloaded material drags as its local .tres — the engine's
+		# own "files" type, so Inspector material slots accept it AND
+		# the scene overlay's local_assign applies it — instead of the
+		# remote_* payload only the overlay understands.
+		var local := _material_file_for(payload)
+		if local != "":
+			data = {"type": "files", "files": [local]}
+		else:
+			data = payload.duplicate()
 	if data == null:
 		return null
 	# set_drag_preview is only legal mid-drag — probes and anything
@@ -171,6 +179,43 @@ static func _card_drag_data(_at: Vector2, item: Control) -> Variant:
 			asset.get("displayName", path.get_file())))
 		item.set_drag_preview(preview)
 	return data
+
+
+## The downloaded .tres/.res/.material behind a material payload —
+## res:// paths win (the importer's version), first match per folder
+## walk. "" when the asset isn't downloaded (or isn't a material), so
+## the remote_* payload stays the drag contract.
+static func _material_file_for(payload: Dictionary) -> String:
+	if not str(payload.get("remote_kind", "")).to_lower() \
+			in ["material", "texture"]:
+		return ""
+	var dir_cb: Variant = payload.get("remote_dir")
+	if not dir_cb is Callable:
+		return ""
+	var dir := str(dir_cb.call())
+	if dir == "":
+		return ""
+	var stack := [dir]
+	while not stack.is_empty():
+		var d: String = stack.pop_back()
+		var da := DirAccess.open(d)
+		if da == null:
+			continue
+		da.list_dir_begin()
+		var f := da.get_next()
+		while not f.is_empty():
+			var p := d.path_join(f)
+			if da.current_is_dir():
+				stack.append(p)
+			elif f.get_extension().to_lower() in ["tres", "res", "material"]:
+				if p.begins_with("res://") or \
+						ProjectSettings.localize_path(p).begins_with("res://"):
+					da.list_dir_end()
+					return p if p.begins_with("res://") \
+						else ProjectSettings.localize_path(p)
+			f = da.get_next()
+		da.list_dir_end()
+	return ""
 
 
 ## Combined AABB of a subtree in its own coordinate frame — local

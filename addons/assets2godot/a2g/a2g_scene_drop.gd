@@ -173,8 +173,10 @@ func _notification(what: int) -> void:
 				_clear_ghost()
 		NOTIFICATION_DRAG_BEGIN:
 			_visuals = _collect_visuals()
+			_tri_cache.clear()
 		NOTIFICATION_DRAG_END:
 			_visuals.clear()
+			_tri_cache.clear()
 			# A drop pins the ghost for the remote download — same rule as
 			# MOUSE_EXIT: only the hover ghost leaves with the drag.
 			if _remote.is_empty():
@@ -372,7 +374,13 @@ func _pick_hit(at: Vector2) -> Dictionary:
 
 
 ## Visual nodes collected once per drag (DRAG_BEGIN) — a fresh scene
-## walk per mouse move would be the expensive part of hovering.
+## walk per mouse move would be the expensive part of hovering. Only
+## real surfaces count: every VisualInstance3D subclass is technically
+## pickable, but lights/probes/decals/notifiers carry a RANGE volume as
+## their AABB, not geometry — a scene-wide omni light would otherwise
+## swallow every single pick. MeshInstance3D + CSG shapes + non-visual
+## get_aabb nodes (GridMap) stay; anything queued for deletion can
+## still sit in a drag-time snapshot (a fading ghost) — never pick it.
 func _collect_visuals() -> Array[Node3D]:
 	var out: Array[Node3D] = []
 	var root := EditorInterface.get_edited_scene_root()
@@ -383,7 +391,9 @@ func _collect_visuals() -> Array[Node3D]:
 		var n := stack.pop_back()
 		var n3d := n as Node3D
 		if n3d != null and not n3d.has_meta(&"a2g_no_drop") \
-				and (n3d is VisualInstance3D or n3d.has_method("get_aabb")):
+				and not n3d.is_queued_for_deletion() \
+				and (n3d is MeshInstance3D or n3d is CSGShape3D
+					or (not n3d is VisualInstance3D and n3d.has_method("get_aabb"))):
 			out.append(n3d)
 		# include_internal: the injected preview stage lives as
 		# INTERNAL_MODE_BACK children — without this its drop
@@ -392,11 +402,26 @@ func _collect_visuals() -> Array[Node3D]:
 	return out
 
 
+## AABB entry order alone can't resolve nested/overlapping boxes — a
+## 5 km ground-plane box wins entry distance over every wall inside
+## it. Candidates therefore get a real triangle test, nearest world
+## hit wins; candidates whose box entry lies past the found hit can
+## never beat it, so the loop early-outs. Triangle arrays are cached
+## for the drag (meshes are shared between instances) and a budget
+## keeps pathological scenes responsive.
+const MAX_PICK_CANDIDATES := 24
+const MAX_PICK_TRIS := 400000
+
+var _tri_cache := {}
+
+
 func _ray_visuals(origin: Vector3, far: Vector3, current_best: float) -> Dictionary:
 	var best := current_best
 	var out := {}
+	var candidates := []
 	for n3d in _visuals:
-		if n3d == _ghost or n3d.get_parent() == _ghost:
+		if n3d == _ghost or n3d.get_parent() == _ghost \
+				or n3d.is_queued_for_deletion() or n3d.has_meta(&"a2g_no_drop"):
 			continue
 		var box: Variant = null
 		if n3d is VisualInstance3D:
@@ -410,21 +435,93 @@ func _ray_visuals(origin: Vector3, far: Vector3, current_best: float) -> Diction
 		var p: Variant = wbox.intersects_segment(origin, far)
 		if p == null:
 			continue
-		var d := origin.distance_to(p)
-		if d < best:
-			best = d
-			out = {"point": p, "node": n3d, "dist": d}
+		candidates.append({"n": n3d, "d": origin.distance_to(p), "p": p})
+	candidates.sort_custom(func(a, b): return a["d"] < b["d"])
+	if candidates.size() > MAX_PICK_CANDIDATES:
+		candidates.resize(MAX_PICK_CANDIDATES)
+	var budget := MAX_PICK_TRIS
+	for c in candidates:
+		if c["d"] >= best or budget <= 0:
+			break
+		var mi := c["n"] as MeshInstance3D
+		if mi == null or mi.mesh == null:
+			best = c["d"]
+			out = {"point": c["p"], "node": c["n"], "dist": c["d"]}
+			continue
+		var h := _mesh_hit(mi, origin, far, best, budget)
+		budget -= int(h.get("tested", 0))
+		if h.has("point"):
+			best = h["dist"]
+			out = {"point": h["point"], "node": mi, "dist": h["dist"]}
 	return out
 
 
+## Per-drag triangle soup per mesh: surface_get_arrays already hands
+## shared PackedArrays (CoW) — expanding indices once per drag is the
+## cheap part; the per-move cost is only the segment tests.
+func _mesh_tris(mi: MeshInstance3D) -> PackedVector3Array:
+	var key := mi.mesh.get_instance_id()
+	if not _tri_cache.has(key):
+		var out := PackedVector3Array()
+		for s in mi.mesh.get_surface_count():
+			var arr := mi.mesh.surface_get_arrays(s)
+			var verts: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+			if idx.is_empty():
+				out.append_array(verts)
+			else:
+				for j in idx:
+					out.append(verts[j])
+		_tri_cache[key] = out
+	return _tri_cache[key]
+
+
+## Möller–Trumbore via Geometry3D in the mesh's LOCAL space (one
+## transform for the ray instead of one per vertex); the winner is
+## re-measured in world space so scaled meshes compare correctly.
+func _mesh_hit(mi: MeshInstance3D, origin: Vector3, far: Vector3,
+		best: float, budget: int) -> Dictionary:
+	var tris := _mesh_tris(mi)
+	if tris.is_empty():
+		return {"tested": 0}
+	var xf := mi.global_transform
+	var xf_inv := xf.affine_inverse()
+	var o := xf_inv * origin
+	var f := xf_inv * far
+	var best_p: Variant = null
+	var best_d := best
+	var tested := 0
+	for i in range(0, tris.size() - 2, 3):
+		var p: Variant = Geometry3D.segment_intersects_triangle(o, f,
+			tris[i], tris[i + 1], tris[i + 2])
+		if p != null:
+			var wp: Vector3 = xf * p
+			var d := origin.distance_to(wp)
+			if d < best_d:
+				best_d = d
+				best_p = wp
+		tested += 1
+		if tested >= budget:
+			break
+	if best_p == null:
+		return {"tested": tested}
+	return {"point": best_p, "dist": best_d, "tested": tested}
+
+
 ## The MeshInstance3D an assign drop would touch: the hit itself, or a
-## collider's/ancestor's subtree — meshes nested under a StaticBody3D
-## are the common shape. `a2g_no_drop` opts a mesh out (the preview's
-## logo mark is branding, not a material test surface).
+## collider's subtree (meshes nested under a StaticBody3D are the
+## common shape — a collider sitting beside its mesh still resolves
+## through the parent). Any OTHER Node3D stays without a target:
+## falling back to "first mesh in the parent's subtree" used to
+## redirect every light/probe/box hit onto whatever mesh sorted first
+## — material landed on a random object, not the aimed surface.
+## `a2g_no_drop` opts a mesh out (the preview's logo mark is branding,
+## not a material test surface — and the drop ghost itself).
 func _assign_target(node: Variant) -> MeshInstance3D:
 	if node is MeshInstance3D:
-		return null if node.has_meta(&"a2g_no_drop") else node
-	if node is Node3D:
+		return null if node.has_meta(&"a2g_no_drop") \
+				or node.is_queued_for_deletion() else node
+	if node is CollisionObject3D:
 		var mi := _mesh_in_subtree(node)
 		if mi != null:
 			return mi
@@ -438,7 +535,8 @@ func _mesh_in_subtree(root: Node) -> MeshInstance3D:
 	var stack: Array[Node] = [root]
 	while not stack.is_empty():
 		var n := stack.pop_back()
-		if n is MeshInstance3D and not n.has_meta(&"a2g_no_drop"):
+		if n is MeshInstance3D and not n.has_meta(&"a2g_no_drop") \
+				and not n.is_queued_for_deletion():
 			return n
 		stack.append_array(n.get_children())
 	return null
@@ -478,6 +576,10 @@ func _ensure_ghost(kind: String) -> void:
 		_shader.code = GHOST_SHADER
 	_ghost = MeshInstance3D.new()
 	_ghost.name = "a2g_drop_ghost"
+	# The ghost is feedback, never a drop surface — a queued-but-still-
+	# in-tree ghost snapshot can otherwise win a pick and swallow the
+	# very material being assigned.
+	_ghost.set_meta(&"a2g_no_drop", true)
 	_ghost_dome = kind.ends_with("hdri")
 	_ghost.mesh = SphereMesh.new() if _ghost_dome else BoxMesh.new()
 	_ghost_mat = ShaderMaterial.new()
@@ -485,6 +587,7 @@ func _ensure_ghost(kind: String) -> void:
 	_ghost.material_override = _ghost_mat
 	var edges := MeshInstance3D.new()
 	edges.name = "a2g_drop_edges"
+	edges.set_meta(&"a2g_no_drop", true)
 	edges.mesh = _equator_mesh() if _ghost_dome else _edge_mesh()
 	var em := StandardMaterial3D.new()
 	em.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED

@@ -5,6 +5,32 @@
 This fork continues the Blendkit for Godot lineage under the Assets2Godot
 name. Entries below `0.8.0` are upstream history, kept for reference.
 
+## 0.9.1 - 2026-11-18
+
+### Fixed
+
+- **Scene drop picking**: drop surfaces are real meshes only — lights,
+  probes and other `VisualInstance3D` volumes (e.g. a scene-wide
+  `OmniLight3D` range box) no longer swallow every pick and redirect
+  the assignment onto an unrelated mesh. Candidates are AABB-filtered
+  and entry-sorted, then verified by real triangle intersection, so
+  the material lands on the surface actually under the cursor even
+  inside overlapping geometry.
+- **Assign target fallback**: a hit that resolves no mesh stays a
+  miss instead of falling back to "first mesh in the parent subtree"
+  — collider-nested meshes still resolve through their body.
+- **Drop ghost hygiene**: the ghost is flagged `a2g_no_drop` and
+  queued-for-deletion nodes are excluded from picking, so a fading
+  ghost can no longer steal the pick and swallow the assigned
+  material.
+- **Downloaded materials drag as files**: a downloaded material card
+  emits its local `.tres` as the engine's native `files` payload —
+  Inspector material slots accept it directly, and the scene overlay
+  still assigns it via `local_assign`.
+- **Preview stage robustness**: `_place_scene` no longer type-errors
+  when a scanned `.tscn` instantiates to a `Control` root instead of
+  `Node3D`.
+
 ## 0.9.0 - 2026-11-18
 
 ### Added

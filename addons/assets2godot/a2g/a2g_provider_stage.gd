@@ -146,7 +146,9 @@ func _place_scene(path: String, pos: Vector3) -> bool:
 	if ResourceLoader.exists(path): # imported → PackedScene or Mesh (.obj)
 		var res: Variant = load(path)
 		if res is PackedScene:
-			inst = res.instantiate()
+			var node: Variant = res.instantiate()
+			if node is Node3D:
+				inst = node
 		elif res is Mesh:
 			var mi := MeshInstance3D.new()
 			mi.mesh = res
