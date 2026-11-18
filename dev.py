@@ -46,6 +46,11 @@ RESULT_DIR = "out"
 ARCHIVE_BASE_NAME = "assets2godot"
 PLUGIN_CLIENT_DIR = os.path.join(PLUGIN_SRC_DIR, PLUGIN_DIR, "client")
 
+# Root LICENSE stays verbatim for GitHub license detection; the plugin copy
+# carries an attribution preamble above the license text. sync_license()
+# splices at this marker so syncing never strips that header.
+LICENSE_MARKER = "GNU GENERAL PUBLIC LICENSE"
+
 ARCHIVE_EXCLUDE = []
 
 
@@ -315,8 +320,25 @@ def install_client_bundle(bundle, expected_version=None, require_all=True):
 
 
 def sync_license():
+    """Sync the license text into the plugin LICENSE, keeping its header.
+
+    The plugin copy carries an upstream-attribution preamble that the
+    verbatim root LICENSE must not have, so copy2 would strip it on every
+    install — keep everything above the license body instead.
+    """
     plugin_license = os.path.join(PLUGIN_SRC_DIR, PLUGIN_DIR, "LICENSE")
-    shutil.copy2("LICENSE", plugin_license)
+    with open("LICENSE", encoding="utf-8", newline="") as f:
+        _, marker, root_body = f.read().partition(LICENSE_MARKER)
+    try:
+        with open(plugin_license, encoding="utf-8", newline="") as f:
+            header, found, _ = f.read().partition(LICENSE_MARKER)
+    except OSError:
+        found = False
+    if not marker or not found:
+        shutil.copy2("LICENSE", plugin_license)
+        return
+    with open(plugin_license, "w", encoding="utf-8", newline="") as f:
+        f.write(header + marker + root_body)
 
 
 def build_client(client_dir=CLIENT_DIR):
