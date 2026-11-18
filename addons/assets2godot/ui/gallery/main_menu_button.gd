@@ -4,6 +4,7 @@ extends Button
 ## Client status dot in its corner, then the editor's "more" dots. It opens
 ## the Client status and switch, the account and plan, settings and links.
 
+const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
 const Auth = preload("res://addons/assets2godot/auth.gd")
 const ClientConnection = preload("res://addons/assets2godot/client_connection.gd")
 const GalleryApi = preload("res://addons/assets2godot/ui/gallery/gallery_api.gd")
@@ -180,6 +181,7 @@ func _on_toggled(pressed: bool) -> void:
 
 
 func _fill_menu() -> void:
+	A2GUI.style_menu_separators(_menu)
 	_menu.clear()
 	_menu.add_icon_item(plugin.connection.get_state_icon(), "Client: %s" % plugin.connection.status_text(), Item.STATUS)
 	_menu.set_item_disabled(-1, true)
@@ -192,7 +194,7 @@ func _fill_menu() -> void:
 	_menu.add_icon_item(get_theme_icon("Tools", "EditorIcons"), "Settings…", Item.SETTINGS)
 	if plugin.connection.state == ClientConnection.State.FAILED:
 		_menu.add_icon_item(get_theme_icon("Reload", "EditorIcons"), "Restart Client", Item.RESTART)
-	_menu.add_separator("Account")
+	_menu.add_separator("ACCOUNT")
 	_fill_account()
 	_menu.add_separator()
 	_menu.add_icon_item(_mono_icon(Icons.ICON_PATH), "Blendkit.com", Item.WEBSITE)

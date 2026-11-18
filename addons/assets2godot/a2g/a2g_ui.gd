@@ -6,6 +6,20 @@ extends RefCounted
 
 const ICON_PATH = "res://addons/assets2godot/a2g/a2g_icon.svg"
 
+## Branded separator headlines — every ⋮ menu (A2G, providers,
+## BlendKit) reads its labeled separators as caps text in the same
+## bold, letter-spaced FontVariation one tick under the default size.
+## Provider names keep their brand casing (ambientCG, Polyhaven);
+## everything else is all caps. Re-applied per _fill_menu so theme
+## changes follow through.
+static func style_menu_separators(menu: PopupMenu) -> void:
+	var sep_font := FontVariation.new()
+	sep_font.base_font = menu.get_theme_default_font()
+	sep_font.variation_embolden = 0.7
+	sep_font.spacing_glyph = 2
+	menu.add_theme_font_override(&"font_separator", sep_font)
+	menu.add_theme_font_size_override(&"font_separator_size", 11)
+
 const KIND_BY_EXT := {
 	"fbx": "model", "obj": "model", "gltf": "model", "glb": "model",
 	"blend": "model", "dae": "model", "stl": "model", "ply": "model",

@@ -13,6 +13,7 @@ extends Button
 ## downloads over plain HTTP; the Client/BlendKit controls live in the
 ## BlendKit tab's menu (client status also shows in the A2G dock).
 
+const A2GUI = preload("res://addons/assets2godot/a2g/a2g_ui.gd")
 const Icons = preload("res://addons/assets2godot/ui/icons.gd")
 
 enum Item {
@@ -176,6 +177,7 @@ func _on_toggled(pressed: bool) -> void:
 ## no login, the license is the "plan"), links, versions. Short labels only:
 ## the popup is as wide as its longest item.
 func _fill_menu() -> void:
+	A2GUI.style_menu_separators(_menu)
 	_menu.clear()
 	var cs := _catalog_state()
 	var cat_icon: Texture2D = get_theme_icon("StatusSuccess", "EditorIcons") if cs == 1 else \

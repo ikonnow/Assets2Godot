@@ -43,7 +43,6 @@ var _thumb_menu: PopupMenu
 var _cap_menu: PopupMenu
 var _fmt_menu: PopupMenu
 var _settings: AcceptDialog
-var _menu_styled := false
 ## GitHub release state: {} unchecked, {"latest": tag, "url": page} or
 ## {"error": why} after a check.
 var _update := {}
@@ -131,17 +130,11 @@ func _on_toggled(pressed: bool) -> void:
 ## longest item.
 func _fill_menu() -> void:
 	# Separator headlines get the A2G branding — emboldened and
-	# letter-spaced like the preview panel's caps labels. Deferred to
-	# first fill: only inside the theme chain does the resolved font
-	# exist (same timing the ENTER_TREE icon fix works around).
-	if not _menu_styled:
-		_menu_styled = true
-		var sep_font := FontVariation.new()
-		sep_font.base_font = _menu.get_theme_default_font()
-		sep_font.variation_embolden = 0.7
-		sep_font.spacing_glyph = 2
-		_menu.add_theme_font_override(&"font_separator", sep_font)
-		_menu.add_theme_font_size_override(&"font_separator_size", 12)
+	# letter-spaced like the preview panel's caps labels. Rebuilt per
+	# fill: only inside the theme chain does the resolved font exist
+	# (same timing the ENTER_TREE icon fix works around), and theme
+	# swaps then re-wrap a fresh base font.
+	A2GUI.style_menu_separators(_menu)
 	_menu.clear()
 	_view_menu.clear()
 	_thumb_menu.clear()
