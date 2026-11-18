@@ -1270,16 +1270,55 @@ func _is_material_file(path: String) -> bool:
 ## range the sky needs for IBL; the imported resource is fallback
 ## only (e.g. a payload Image can't decode but an older import can).
 func _load_hdri(path: String) -> Texture2D:
+	return _sky_texture(path)
+
+
+## Renderer-adaptive panorama texture. Forward+/Mobile want the real
+## HDR floats; the Compatibility renderer has no HDR pipeline (the
+## sky path expects sRGB LDR — issue #83788), so there a decoded
+## HDR is tonemapped + sRGB-encoded to LDR first. That reproduces
+## the provider's preview look instead of dark mids + clipped sky.
+static func _sky_texture(path: String) -> Texture2D:
 	var fs := path if not path.begins_with("res://") \
 		else ProjectSettings.globalize_path(path)
 	var img := Image.new()
 	if img.load(fs) == OK:
+		if RenderingServer.get_current_rendering_method() \
+				== "gl_compatibility":
+			return _compat_sky_tex(img)
 		return ImageTexture.create_from_image(img)
 	if ResourceLoader.exists(path):
 		var res := ResourceLoader.load(path)
 		if res is Texture2D:
 			return res
 	return null
+
+
+## Half-res tonemap bake for gl_compatibility — the sky is
+## low-frequency, half size is invisible in practice and keeps the
+## per-pixel curve pass around a second for a 2K source.
+static func _compat_sky_tex(img: Image) -> Texture2D:
+	img.convert(Image.FORMAT_RGBF)
+	img.resize(img.get_width() / 2, img.get_height() / 2)
+	var px: PackedFloat32Array = img.get_data().to_float32_array()
+	var out := PackedByteArray()
+	out.resize(px.size())
+	for i in px.size():
+		out[i] = int(clampf(_srgb(_aces(px[i])) * 255.0 + 0.5, 0, 255))
+	var ldr := Image.create_from_data(img.get_width(), img.get_height(),
+		false, Image.FORMAT_RGB8, out)
+	return ImageTexture.create_from_image(ldr)
+
+
+## Narkowicz ACES approx — soft highlight shoulder, keeps the sun
+## from clamping while mids stay open.
+static func _aces(x: float) -> float:
+	return clampf((x * (2.51 * x + 0.03)) \
+		/ (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0)
+
+
+static func _srgb(v: float) -> float:
+	return pow(maxf(v, 0.0), 1.0 / 2.2)
 
 
 # MARK: host discovery — editor internals, duck-typed on purpose

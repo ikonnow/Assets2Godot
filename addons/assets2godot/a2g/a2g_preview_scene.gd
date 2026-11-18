@@ -68,6 +68,10 @@ const PANEL_NAME := "A2GPreviewPanel"
 ## parked panel gets renamed "@PanelContainer@<id>" and escapes every
 ## name match.
 const PANEL_GROUP := "a2g_preview_panel"
+## Separate group so an auto-renamed logo never collides with the
+## panel's structural fingerprint in the reaper.
+const LOGO_GROUP := "a2g_preview_logo"
+const A2G_ICON := "res://addons/assets2godot/a2g/a2g_icon.svg"
 ## The editor rebuilds the viewport's input surface at its own pace —
 ## the panel re-attaches on this cadence, same rule as the drop overlay.
 const HOST_RECHECK := 45
@@ -78,6 +82,11 @@ var _ground_dup: StandardMaterial3D
 ## Editor-side copy of the overlay, parked inside the 3D viewport's
 ## input surface — ownerless, so it never enters the edited scene.
 var _editor_panel: Control
+## The panel's collapsed form — a flat A2G logo in the same corner.
+var _editor_logo: Control
+## Panel visibility — the Title checkbox and the logo button share
+## this state; it is per-instance and intentionally not exported.
+var _ui_visible := true
 var _host_tick := 0
 ## Solo-view state: nodes solo hid, so unchecking restores exactly
 ## what it touched. Same-scene refs stay valid while solo runs.
@@ -111,8 +120,38 @@ func _spawn_runtime_ui() -> Control:
 	layer.name = "PreviewUI"
 	var panel: Control = load(PANEL_SCENE_PATH).instantiate()
 	layer.add_child(panel)
+	var logo := _spawn_logo_button()
+	logo.name = "LogoBtn"
+	layer.add_child(logo)
 	add_child(layer)
+	_apply_ui_visible()
 	return panel
+
+
+## The panel's collapsed form — a flat A2G logo in the same
+## bottom-left corner while the panel itself is hidden.
+func _spawn_logo_button() -> Button:
+	var b := Button.new()
+	b.icon = load(A2G_ICON) as Texture2D
+	b.tooltip_text = "Show the A2G preview panel"
+	b.flat = true
+	b.expand_icon = true
+	b.custom_minimum_size = Vector2(36, 36)
+	b.anchor_top = 1.0
+	b.anchor_bottom = 1.0
+	b.offset_left = 12.0
+	b.offset_top = -50.0
+	b.offset_right = 50.0
+	b.offset_bottom = -12.0
+	b.grow_vertical = 0
+	b.visible = false
+	var wr := weakref(self)
+	b.pressed.connect(
+		func() -> void:
+			var o = wr.get_ref()
+			if o != null:
+				o._set_ui_visible(true))
+	return b
 
 
 func _process(_dt: float) -> void:
@@ -127,6 +166,8 @@ func _process(_dt: float) -> void:
 func _exit_tree() -> void:
 	if is_instance_valid(_editor_panel):
 		_editor_panel.queue_free()
+	if is_instance_valid(_editor_logo):
+		_editor_logo.queue_free()
 
 
 ## Editor twin of the runtime overlay — an instance of the same panel
@@ -200,7 +241,26 @@ func _attach_editor_panel() -> void:
 		if is_instance_valid(_editor_panel):
 			_editor_panel.queue_free()
 		_editor_panel = null
+		if is_instance_valid(_editor_logo):
+			_editor_logo.queue_free()
+		_editor_logo = null
 		return
+	# The UI belongs to the open preview scene only — an injected
+	# stage in a user scene runs the reaper above but never parks
+	# its own panel or logo.
+	if root != self:
+		if is_instance_valid(_editor_panel):
+			_editor_panel.queue_free()
+			_editor_panel = null
+		if is_instance_valid(_editor_logo):
+			_editor_logo.queue_free()
+			_editor_logo = null
+		return
+	# Logo reaper — same orphan story as the panel, kept in its own
+	# group so it never trips the panel's structural fingerprint.
+	for l in get_tree().get_nodes_in_group(LOGO_GROUP):
+		if l != _editor_logo:
+			l.queue_free()
 	if not is_instance_valid(_editor_panel):
 		_editor_panel = ResourceLoader.load(PANEL_SCENE_PATH, "",
 				ResourceLoader.CACHE_MODE_REPLACE).instantiate()
@@ -214,12 +274,28 @@ func _attach_editor_panel() -> void:
 			_editor_panel.reparent(surface)
 		else:
 			surface.add_child(_editor_panel)
+	if not is_instance_valid(_editor_logo):
+		_editor_logo = _spawn_logo_button()
+		_editor_logo.name = "A2GPreviewLogo"
+		_editor_logo.set_meta(&"a2g_owner", self)
+		_editor_logo.add_to_group(LOGO_GROUP)
+	if _editor_logo.get_parent() != surface:
+		if _editor_logo.get_parent() != null:
+			_editor_logo.reparent(surface)
+		else:
+			surface.add_child(_editor_logo)
+	_apply_ui_visible()
 
 
 func _wire_ui(vb: VBoxContainer) -> void:
 	# Orphaned panels keep these connections — without a weak owner a
 	# dead capture logs "lambda capture freed" on every emit.
 	var wr := weakref(self)
+	vb.get_node("Title").toggled.connect(
+		func(on: bool) -> void:
+			var o = wr.get_ref()
+			if o != null:
+				o._set_ui_visible(on))
 	vb.get_node("SkyCheck").toggled.connect(
 		func(on: bool) -> void:
 			var o = wr.get_ref()
@@ -266,7 +342,7 @@ func _wire_ui(vb: VBoxContainer) -> void:
 ## follows whatever theme the editor/game is in.
 func _style_headlines(vb: VBoxContainer) -> void:
 	for name in ["Title", "LblZones", "LblPlace"]:
-		var l: Label = vb.get_node_or_null(name)
+		var l: Control = vb.get_node_or_null(name)
 		if l == null or l.has_theme_font_override(&"font"):
 			continue
 		var fv := FontVariation.new()
@@ -355,6 +431,7 @@ func _zone_aabb(n: Node) -> Variant:
 ## adopted parked panel skips _wire_ui but still lands here.
 func _sync_controls(vb: VBoxContainer) -> void:
 	_style_headlines(vb)
+	_sync_check(vb.get_node(^"Title"), _ui_visible)
 	_sync_check(vb.get_node(^"SkyCheck"), activate_sky)
 	_sync_check(vb.get_node(^"ZoneGrid/ZnRefs"), show_references)
 	_sync_check(vb.get_node(^"ZoneGrid/ZnTargets"), show_targets)
@@ -378,11 +455,37 @@ func _sync_check(c: CheckBox, on: bool) -> void:
 
 ## Both surfaces — the runtime overlay and the parked editor twin.
 func _resync_controls() -> void:
+	_apply_ui_visible()
 	var vb := get_node_or_null(^"PreviewUI/Panel/Margin/VBox") as VBoxContainer
 	if vb != null:
 		_sync_controls(vb)
 	if is_instance_valid(_editor_panel):
 		_sync_controls(_editor_panel.get_node(^"Margin/VBox"))
+
+
+## Title checkbox off → the panel hides and a flat A2G logo keeps
+## the bottom-left corner; a click on it brings the panel back.
+func _set_ui_visible(on: bool) -> void:
+	if on == _ui_visible:
+		return
+	_ui_visible = on
+	_apply_ui_visible()
+	_resync_controls()
+
+
+## Push _ui_visible onto both surfaces — panel and logo are mutually
+## exclusive, one of them is always visible.
+func _apply_ui_visible() -> void:
+	var rt := get_node_or_null(^"PreviewUI/Panel")
+	if rt != null:
+		rt.visible = _ui_visible
+	var rl := get_node_or_null(^"PreviewUI/LogoBtn")
+	if rl != null:
+		rl.visible = not _ui_visible
+	if is_instance_valid(_editor_panel):
+		_editor_panel.visible = _ui_visible
+	if is_instance_valid(_editor_logo):
+		_editor_logo.visible = not _ui_visible
 
 
 func _apply_sky() -> void:
@@ -683,16 +786,10 @@ func _own_placed(inst: Node3D) -> void:
 	inst.owner = self
 
 
-## Raw decode first — same reason as _load_hdri in scene_drop: the
-## imported .hdr lands as low-quality BC6H, the raw file keeps the
-## panorama's full range for the sky.
+## Sky textures route through SceneDrop._sky_texture — raw decode +
+## renderer-adaptive LDR tonemap for Compatibility, shared logic.
 func _load_tex(path: String) -> Texture2D:
-	var img := Image.new()
-	if img.load(path) == OK:
-		return ImageTexture.create_from_image(img)
-	if ResourceLoader.exists(path):
-		return load(path) as Texture2D
-	return null
+	return SceneDrop._sky_texture(path)
 
 
 ## Every usable payload under the provider roots, by kind — real
