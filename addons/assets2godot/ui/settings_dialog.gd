@@ -361,9 +361,9 @@ func _section(text: String, tooltip: String) -> void:
 			fv.variation_embolden = 0.7
 			fv.spacing_glyph = 2
 			label.add_theme_font_override("font", fv)
-			# One size smaller — same read as the preview headlines.
-			label.add_theme_font_size_override("font_size",
-				label.get_theme_default_font_size() - 2)
+			# Fixed 13 like the preview panel's headlines — uniform
+			# caps size across every A2G surface.
+			label.add_theme_font_size_override("font_size", 13)
 		if _grid.get_child_count() > 0:
 			label.custom_minimum_size.y = 24 * edscale
 			label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM

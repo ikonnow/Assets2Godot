@@ -133,6 +133,7 @@ func _fill_menu() -> void:
 		sep_font.variation_embolden = 0.7
 		sep_font.spacing_glyph = 2
 		_menu.add_theme_font_override(&"font_separator", sep_font)
+		_menu.add_theme_font_size_override(&"font_separator_size", 13)
 	_menu.clear()
 	_view_menu.clear()
 	_thumb_menu.clear()
