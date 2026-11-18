@@ -191,7 +191,7 @@ func _fill_menu() -> void:
 	_menu.add_icon_item(get_theme_icon("Folder", "EditorIcons"), "Download folder…", Item.TARGET)
 	var dir: String = polyhaven._target_dir() if polyhaven != null else ""
 	_menu.set_item_tooltip(-1, "%s\nClick to change." % dir)
-	_menu.add_separator("Polyhaven")
+	_menu.add_separator("POLYHAVEN")
 	_menu.add_icon_item(_mono_icon(USER_ICON_PATH), "No account needed", Item.ACCOUNT)
 	_menu.set_item_disabled(-1, true)
 	_menu.set_item_tooltip(-1, "Everything on polyhaven.com is CC0 — no login, no key.")

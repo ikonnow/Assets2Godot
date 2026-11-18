@@ -190,7 +190,7 @@ func _fill_menu() -> void:
 	_menu.add_icon_item(get_theme_icon("Folder", "EditorIcons"), "Download folder…", Item.TARGET)
 	var dir: String = ambientcg._target_dir() if ambientcg != null else ""
 	_menu.set_item_tooltip(-1, "%s\nClick to change." % dir)
-	_menu.add_separator("ambientCG")
+	_menu.add_separator("AMBIENTCG")
 	_menu.add_icon_item(_mono_icon(USER_ICON_PATH), "No account needed", Item.ACCOUNT)
 	_menu.set_item_disabled(-1, true)
 	_menu.set_item_tooltip(-1, "Everything on ambientcg.com is CC0 — no login, no key. Patreon supporters can pass an API token for perks; the catalog doesn't need it.")
