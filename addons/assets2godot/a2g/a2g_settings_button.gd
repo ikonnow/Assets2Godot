@@ -151,7 +151,7 @@ func _fill_menu() -> void:
 		_menu.set_item_tooltip(-1, "Show the %s tab.%s" % [p.get("title", key),
 			" The Client keeps running — the A2G index needs it." if daemon else \
 			" Its catalog never fetches while off."])
-	_menu.add_separator("A2G FILES")
+	_menu.add_separator("A2G FILE SETTINGS")
 	for i in VIEW_MODES.size():
 		_view_menu.add_radio_check_item(VIEW_MODES[i], i)
 		_view_menu.set_item_checked(i, int(_es(SETTING_VIEW, 0)) == i)
