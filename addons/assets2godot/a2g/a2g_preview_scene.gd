@@ -585,8 +585,12 @@ func _stage_env() -> Environment:
 func _apply_lighting() -> void:
 	if not is_inside_tree():
 		return
-	$WorldEnvironment.environment = _stage_env() \
-			if use_preview_lighting else null
+	# Capture before the ternary: inside it _stage_env() never runs in
+	# the off branch — _env stays empty while the detach drops the
+	# node's last ref on its local_to_scene env, and re-on then has
+	# a dead resource to attach.
+	var env := _stage_env()
+	$WorldEnvironment.environment = env if use_preview_lighting else null
 	$Sun.visible = use_preview_lighting
 	_resync_controls()
 

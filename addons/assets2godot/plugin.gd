@@ -619,6 +619,9 @@ func _sync_preview() -> void:
 		_preview_scene = packed.instantiate() as Node3D
 		if _preview_scene == null:
 			return
+		# An injected guest defers to the host's lighting — preview env
+		# + sun stay off until the panel's "Preview lighting" opts in.
+		_preview_scene.set(&"use_preview_lighting", false)
 		root.add_child(_preview_scene, false, Node.INTERNAL_MODE_BACK)
 
 
