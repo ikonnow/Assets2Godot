@@ -560,14 +560,14 @@ def launch_status():
         f"{GITHUB_API}/repos/Calinou/awesome-godot/pulls/547",
         gh_json(pr_state))
     add("Reddit r/godot post",
-        "https://www.reddit.com/r/godot/comments/1xs027m/.json",
+        "https://www.reddit.com/r/godot/comments/1xzn0rx/.json",
         lambda s, b, err: (s == 200, f"HTTP {s}" + (" (403 = bot filter, post may still be live)" if s == 403 else "")))
 
     def bsky(_s, _b, _e):
-        ok, note = _bsky_post_alive("ikonnow.bsky.social", "3mzvnci5fos2e")
+        ok, note = _bsky_post_alive("ikonnow.bsky.social", "3n2m7f44h4c26")
         return ok, note or "post exists"
     add("Bluesky post",
-        "https://bsky.app/profile/ikonnow.bsky.social/post/3mzvnci5fos2e",
+        "https://bsky.app/profile/ikonnow.bsky.social/post/3n2m7f44h4c26",
         bsky)
     add("Mastodon profile (gamedev.place)",
         "https://mastodon.gamedev.place/@ikonnow",
