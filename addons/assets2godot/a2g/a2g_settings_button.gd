@@ -144,7 +144,7 @@ func _fill_menu() -> void:
 		_view_menu.add_radio_check_item(VIEW_MODES[i], i)
 		_view_menu.set_item_checked(i, int(_es(SETTING_VIEW, 0)) == i)
 	_menu.add_submenu_item("Browser view", _view_menu.name)
-	_menu.set_item_tooltip(-1, "Gallery tiles or a compact list — the browser's view button and the Settings dialog share this key (applies on the next browser load).")
+	_menu.set_item_tooltip(-1, "Gallery tiles or a compact list — shared with the Settings dialog (applies on next browser load).")
 	for i in THUMB_SIZES.size():
 		_thumb_menu.add_radio_check_item("%d px" % THUMB_SIZES[i], i)
 		_thumb_menu.set_item_checked(i, _es(SETTING_THUMB, 256) == THUMB_SIZES[i])
@@ -160,7 +160,7 @@ func _fill_menu() -> void:
 		_fmt_menu.add_radio_check_item(label, i)
 		_fmt_menu.set_item_checked(i, _es(SETTING_TEX_FORMAT, "auto") == TEX_FORMATS[i])
 	_menu.add_submenu_item("Texture format", _fmt_menu.name)
-	_menu.set_item_tooltip(-1, "Default map format for texture downloads — Auto picks PNG when the asset has an opacity map. Per-provider overrides live in Settings.")
+	_menu.set_item_tooltip(-1, "Default format for texture downloads — Auto picks PNG for opacity maps. Per-provider overrides live in Settings.")
 	# Icon check row like the provider switches above — a plain check
 	# item renders its box offset from the icon_check rows' boxes.
 	_menu.add_icon_check_item(get_theme_icon("FileList", "EditorIcons"), "Show all files", Item.SHOW_FILES)
@@ -172,11 +172,11 @@ func _fill_menu() -> void:
 	_menu.add_icon_check_item(get_theme_icon("EditorDock", "EditorIcons"),
 		"Docked panel", Item.PANEL_DOCKED)
 	_menu.set_item_checked(-1, plugin.panel_mode() == plugin.PanelMode.DOCKED)
-	_menu.set_item_tooltip(-1, "Move the A2G panel into a native editor dock — position, floating and close then come from the dock's ⋮ menu.")
+	_menu.set_item_tooltip(-1, "Dock the A2G panel natively — position and close then come from the dock's ⋮ menu.")
 	_menu.add_icon_check_item(get_theme_icon("WorldEnvironment", "EditorIcons"),
-		"Preview scene", Item.PREVIEW_SCENE)
+		"Preview stage in edited scene ", Item.PREVIEW_SCENE)
 	_menu.set_item_checked(-1, plugin.preview_scene_enabled())
-	_menu.set_item_tooltip(-1, "Instance the neutral test stage into the edited scene — its WorldEnvironment overrides yours while shown; it's an internal, unsaved child, so nothing lands in your file.")
+	_menu.set_item_tooltip(-1, "Places the neutral test stage inside the edited scene — internal child, never saved. Its environment replaces the scene's while on.")
 	var has_dir := DirAccess.dir_exists_absolute(A2G_DIR)
 	_menu.add_icon_item(get_theme_icon("Folder", "EditorIcons"), "Show downloads folder", Item.OPEN_DIR)
 	if not has_dir:

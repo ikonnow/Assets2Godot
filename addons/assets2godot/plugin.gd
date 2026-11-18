@@ -41,8 +41,9 @@ const SETTING_A2G_TAB_LOGOS = "assets2godot/tab_logos"
 # Where the A2G panel lives: embedded in its main screen, or a native
 # editor dock (whose ⋮ menu then offers position, floating and close).
 const SETTING_A2G_PANEL_MODE = "assets2godot/panel_mode"
-# The A2G menu's "Preview scene" switch — instances the neutral test
-# stage into the edited scene as internal, unsaved children.
+# The A2G menu's "Preview stage in edited scene" switch — instances
+# the neutral test stage into the edited scene as internal, unsaved
+# children.
 const SETTING_A2G_PREVIEW = "assets2godot/preview_scene"
 const PREVIEW_SCENE_PATH := "res://addons/assets2godot/a2g/a2g_preview_scene.tscn"
 # Tab logo render size — the editor's 16px glyph grid, capped per tab
@@ -556,8 +557,8 @@ func _pane_provider_key(pane: Control) -> String:
 
 
 ## Whether the preview stage is instanced into the edited scene — the
-## A2G menu's "Preview scene" switch (assets2godot/preview_scene),
-## default off.
+## A2G menu's "Preview stage in edited scene" switch
+## (assets2godot/preview_scene) — default off.
 func preview_scene_enabled() -> bool:
 	var es := EditorInterface.get_editor_settings()
 	if es and es.has_setting(SETTING_A2G_PREVIEW):
