@@ -76,16 +76,16 @@ func setup(new_plugin: EditorPlugin) -> void:
 				else " Its catalog never fetches while off."])
 		_prov_checks[key] = check
 
-	_section("A2G panel", "The Assets2Godot panel itself — where it lives and how its tabs look.\nSaved in your editor settings. Also in Editor Settings → Assets2Godot.")
+	_section("Assets2Godot panel", "The Assets2Godot panel itself — where it lives and how its tabs look.\nSaved in your editor settings. Also in Editor Settings → Assets2Godot.")
 	_a2g_panel = _options(["Embedded (main screen)", "Docked"])
 	_a2g_panel.item_selected.connect(func(i): plugin.set_panel_mode(i))
-	_row("A2G panel", _a2g_panel, "Where the Assets2Godot panel opens.\nEmbedded keeps it inside its own main screen; Docked moves it into a native editor dock — the dock's ⋮ menu then offers dock position, floating and close, and the header button toggles the same setting.")
+	_row("Assets2Godot panel", _a2g_panel, "Where the Assets2Godot panel opens.\nEmbedded keeps it inside its own main screen; Docked moves it into a native editor dock — the dock's ⋮ menu then offers dock position, floating and close, and the header button toggles the same setting.")
 	_a2g_tablogos = CheckBox.new()
 	_a2g_tablogos.text = "Show provider logos in the main tabs"
 	_a2g_tablogos.toggled.connect(plugin.set_tab_logos)
 	_row("Provider logos", _a2g_tablogos, "Marks BlendKit, Polyhaven and ambientCG tabs with their provider logo.\nOff keeps the tabs text-only like the editor's own — the A2G menu's 'Provider logos in tabs' toggles the same setting.")
 
-	_section("A2G download defaults", "Which option drag & drop, the quick-download tile and the details popup preselect for texture-bearing providers.\nProvider rows override the global default; 'Provider default' inherits it.\nAlso in Editor Settings → Assets2Godot.")
+	_section("Assets2Godot download defaults", "Which option drag & drop, the quick-download tile and the details popup preselect for texture-bearing providers.\nProvider rows override the global default; 'Provider default' inherits it.\nAlso in Editor Settings → Assets2Godot.")
 	_tex_format = _options(["Auto (PNG when the asset has an opacity map)", "JPEG", "PNG"])
 	_tex_format.item_selected.connect(func(i): _set_es("assets2godot/texture_format", ["auto", "jpg", "png"][i]))
 	_row("Texture format", _tex_format, "Default map format for new texture downloads.\nAuto picks PNG when the asset ships an opacity map (alpha needs lossless edges) and JPEG otherwise — JPEG is ~3× smaller.\nPNG keeps mask edges lossless; JPEG still renders transparent through the alpha bake, just with softer/noisier cutout edges.")

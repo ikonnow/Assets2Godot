@@ -133,7 +133,7 @@ func _fill_menu() -> void:
 		sep_font.variation_embolden = 0.7
 		sep_font.spacing_glyph = 2
 		_menu.add_theme_font_override(&"font_separator", sep_font)
-		_menu.add_theme_font_size_override(&"font_separator_size", 13)
+		_menu.add_theme_font_size_override(&"font_separator_size", 12)
 	_menu.clear()
 	_view_menu.clear()
 	_thumb_menu.clear()
@@ -215,7 +215,7 @@ func _fill_menu() -> void:
 	_menu.add_icon_item(get_theme_icon("Debug", "EditorIcons"), "Report an Issue", Item.ISSUES)
 	_menu.set_item_tooltip(-1, plugin.ISSUES_URL)
 	_menu.add_separator()
-	_menu.add_item("A2G Plugin v%s" % plugin.get_addon_version(), Item.VERSION)
+	_menu.add_item("Assets2Godot Plugin v%s" % plugin.get_addon_version(), Item.VERSION)
 	_menu.set_item_disabled(-1, true)
 
 
