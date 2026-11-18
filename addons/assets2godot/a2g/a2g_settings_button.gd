@@ -43,6 +43,7 @@ var _thumb_menu: PopupMenu
 var _cap_menu: PopupMenu
 var _fmt_menu: PopupMenu
 var _settings: AcceptDialog
+var _menu_styled := false
 ## GitHub release state: {} unchecked, {"latest": tag, "url": page} or
 ## {"error": why} after a check.
 var _update := {}
@@ -121,6 +122,17 @@ func _on_toggled(pressed: bool) -> void:
 ## short labels, a click does the verb; the popup is as wide as its
 ## longest item.
 func _fill_menu() -> void:
+	# Separator headlines get the A2G branding — emboldened and
+	# letter-spaced like the preview panel's caps labels. Deferred to
+	# first fill: only inside the theme chain does the resolved font
+	# exist (same timing the ENTER_TREE icon fix works around).
+	if not _menu_styled:
+		_menu_styled = true
+		var sep_font := FontVariation.new()
+		sep_font.base_font = _menu.get_theme_default_font()
+		sep_font.variation_embolden = 0.7
+		sep_font.spacing_glyph = 2
+		_menu.add_theme_font_override(&"font_separator", sep_font)
 	_menu.clear()
 	_view_menu.clear()
 	_thumb_menu.clear()
@@ -138,7 +150,7 @@ func _fill_menu() -> void:
 		_menu.set_item_tooltip(-1, "Show the %s tab.%s" % [p.get("title", key),
 			" The Client keeps running — the A2G index needs it." if daemon else \
 			" Its catalog never fetches while off."])
-	_menu.add_separator("Assets2Godot Files")
+	_menu.add_separator("ASSETS2GODOT FILES")
 	for i in VIEW_MODES.size():
 		_view_menu.add_radio_check_item(VIEW_MODES[i], i)
 		_view_menu.set_item_checked(i, int(_es(SETTING_VIEW, 0)) == i)
@@ -166,7 +178,7 @@ func _fill_menu() -> void:
 	_menu.add_icon_check_item(get_theme_icon("File", "EditorIcons"), "Show all files", Item.SHOW_FILES)
 	_menu.set_item_checked(-1, bool(_es(SETTING_FILES, false)))
 	_menu.set_item_tooltip(-1, "List text files, configs and scripts in the Assets view too.")
-	_menu.add_separator("Assets2Godot")
+	_menu.add_separator("ASSETS2GODOT")
 	_menu.add_submenu_item("Texture format", _fmt_menu.name)
 	_menu.set_item_icon(-1, get_theme_icon("AssetStore", "EditorIcons"))
 	_menu.set_item_tooltip(-1, "Default format for texture downloads — Auto picks PNG for opacity maps. Per-provider overrides live in Settings.")
