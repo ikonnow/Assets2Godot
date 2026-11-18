@@ -67,19 +67,27 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_menu.popup_hide.connect(func(): set_pressed_no_signal(false))
 	_view_menu = PopupMenu.new()
 	_view_menu.name = "ViewMenu"
-	_view_menu.id_pressed.connect(func(id): _set_es(SETTING_VIEW, id))
+	_view_menu.id_pressed.connect(func(id):
+		_set_es(SETTING_VIEW, id)
+		_sync_radio(_view_menu, id))
 	_menu.add_child(_view_menu)
 	_thumb_menu = PopupMenu.new()
 	_thumb_menu.name = "ThumbMenu"
-	_thumb_menu.id_pressed.connect(func(id): _set_es(SETTING_THUMB, THUMB_SIZES[id]))
+	_thumb_menu.id_pressed.connect(func(id):
+		_set_es(SETTING_THUMB, THUMB_SIZES[id])
+		_sync_radio(_thumb_menu, id))
 	_menu.add_child(_thumb_menu)
 	_cap_menu = PopupMenu.new()
 	_cap_menu.name = "CapMenu"
-	_cap_menu.id_pressed.connect(func(id): _set_es(SETTING_CAP, SCENE_CAPS[id]))
+	_cap_menu.id_pressed.connect(func(id):
+		_set_es(SETTING_CAP, SCENE_CAPS[id])
+		_sync_radio(_cap_menu, id))
 	_menu.add_child(_cap_menu)
 	_fmt_menu = PopupMenu.new()
 	_fmt_menu.name = "FmtMenu"
-	_fmt_menu.id_pressed.connect(func(id): _set_es(SETTING_TEX_FORMAT, TEX_FORMATS[id]))
+	_fmt_menu.id_pressed.connect(func(id):
+		_set_es(SETTING_TEX_FORMAT, TEX_FORMATS[id])
+		_sync_radio(_fmt_menu, id))
 	_menu.add_child(_fmt_menu)
 	# The one shared Settings dialog — the BlendKit menu builds it if we
 	# didn't; both menus open the same surface.
@@ -197,7 +205,7 @@ func _fill_menu() -> void:
 	_menu.set_item_checked(-1, plugin.panel_mode() == plugin.PanelMode.DOCKED)
 	_menu.set_item_tooltip(-1, "Dock the A2G panel natively — position and close then come from the dock's ⋮ menu.")
 	_menu.add_icon_check_item(get_theme_icon("WorldEnvironment", "EditorIcons"),
-		"Preview stage in edited scene ", Item.PREVIEW_SCENE)
+		"Preview stage in edited scene", Item.PREVIEW_SCENE)
 	_menu.set_item_checked(-1, plugin.preview_scene_enabled())
 	_menu.set_item_tooltip(-1, "Places the neutral test stage inside the edited scene — internal child, never saved. Its environment replaces the scene's while on.")
 	var has_dir := DirAccess.dir_exists_absolute(A2G_DIR)
@@ -251,24 +259,35 @@ func _fill_update_row() -> void:
 		_menu.set_item_disabled(-1, true)
 
 
+## Toggle rows keep the menu open  (hide_on_checkable_item_selection
+## is off) — PopupMenu does not flip the check mark itself, so every
+## toggle action re-syncs its row's checked state right away. Without
+## this the box paints stale until the next _fill_menu.
 func _on_id_pressed(id: int) -> void:
+	var idx := _menu.get_item_index(id)
 	if id >= PROVIDER_BASE:
 		var i := id - PROVIDER_BASE
 		if i < plugin.PROVIDERS.size():
 			var key := str(plugin.PROVIDERS[i].get("key", ""))
 			plugin.set_provider_enabled(key, not plugin.provider_enabled(key))
+			_menu.set_item_checked(idx, plugin.provider_enabled(key))
 		return
 	match id:
 		Item.SHOW_FILES:
 			_set_es(SETTING_FILES, not bool(_es(SETTING_FILES, false)))
+			_menu.set_item_checked(idx, bool(_es(SETTING_FILES, false)))
 		Item.TAB_LOGOS:
 			plugin.set_tab_logos(not plugin.tab_logos_enabled())
+			_menu.set_item_checked(idx, plugin.tab_logos_enabled())
 		Item.PANEL_DOCKED:
 			plugin.set_panel_mode(plugin.PanelMode.EMBEDDED \
 				if plugin.panel_mode() == plugin.PanelMode.DOCKED \
 				else plugin.PanelMode.DOCKED)
+			_menu.set_item_checked(idx,
+				plugin.panel_mode() == plugin.PanelMode.DOCKED)
 		Item.PREVIEW_SCENE:
 			plugin.set_preview_scene(not plugin.preview_scene_enabled())
+			_menu.set_item_checked(idx, plugin.preview_scene_enabled())
 		Item.OPEN_DIR:
 			_menu.hide()
 			EditorInterface.get_file_system_dock().navigate_to_path(A2G_DIR)
@@ -343,6 +362,13 @@ func _version_newer(latest: String, current: String) -> bool:
 		if x != y:
 			return x > y
 	return false
+
+
+## Radio submenus get the same live resync — the picked entry checks,
+## the rest unchecks.
+func _sync_radio(menu: PopupMenu, id: int) -> void:
+	for i in menu.get_item_count():
+		menu.set_item_checked(i, menu.get_item_id(i) == id)
 
 
 func _es(key: String, fallback: Variant) -> Variant:

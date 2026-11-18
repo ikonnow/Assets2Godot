@@ -250,7 +250,11 @@ func _attach_editor_panel() -> void:
 			p.add_to_group(PANEL_GROUP)
 		elif is_instance_valid(owner) and owner is Node \
 				and (owner as Node).is_inside_tree() \
-				and not (self == root and owner != root):
+				and (owner == root or (owner as Node).get_parent() == root):
+			# A live owner in the active context — the edited scene
+			# root itself or a stage injected into it — keeps the
+			# slot. Everything else (inactive tabs' panels, orphans)
+			# goes; the active context's instance outranks them.
 			foreign = p
 		else:
 			# No meta, a freed owner, or a detached-but-alive orphan:
@@ -264,10 +268,11 @@ func _attach_editor_panel() -> void:
 			_editor_logo.queue_free()
 		_editor_logo = null
 		return
-	# The UI belongs to the open preview scene only — an injected
-	# stage in a user scene runs the reaper above but never parks
-	# its own panel or logo.
-	if root != self:
+	# The UI belongs to the active context only — the edited scene
+	# root itself, or a stage injected into it (an internal child of
+	# root). Other tabs' and stale copies run the reaper above but
+	# never park.
+	if self != root and get_parent() != root:
 		if is_instance_valid(_editor_panel):
 			_editor_panel.queue_free()
 			_editor_panel = null
@@ -289,7 +294,7 @@ func _attach_editor_panel() -> void:
 			_editor_logo = l
 		elif is_instance_valid(lo) and lo is Node \
 				and (lo as Node).is_inside_tree() \
-				and not (self == root and lo != root):
+				and (lo == root or (lo as Node).get_parent() == root):
 			continue
 		else:
 			l.queue_free()
