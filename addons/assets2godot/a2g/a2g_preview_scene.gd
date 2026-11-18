@@ -136,14 +136,11 @@ func _spawn_logo_button() -> Button:
 	b.tooltip_text = "Show the A2G preview panel"
 	b.flat = true
 	b.expand_icon = true
-	b.custom_minimum_size = Vector2(36, 36)
-	b.anchor_top = 1.0
-	b.anchor_bottom = 1.0
-	b.offset_left = 12.0
-	b.offset_top = -50.0
-	b.offset_right = 50.0
-	b.offset_bottom = -12.0
-	b.grow_vertical = 0
+	# Empty styleboxes kill the flat-button content margins so the
+	# SVG fills the whole button — without them ~8 px/frame is lost.
+	for s in [&"normal", &"hover", &"pressed", &"focus"]:
+		b.add_theme_stylebox_override(s, StyleBoxEmpty.new())
+	_layout_logo(b)
 	b.visible = false
 	var wr := weakref(self)
 	b.pressed.connect(
@@ -152,6 +149,20 @@ func _spawn_logo_button() -> Button:
 			if o != null:
 				o._set_ui_visible(true))
 	return b
+
+
+## The logo's bottom-left corner geometry — pulled out of the
+## spawner so a re-adopted straggler parked under older bytecode
+## heals on the next attach instead of keeping its stale rect.
+func _layout_logo(b: Control) -> void:
+	b.custom_minimum_size = Vector2(48, 48)
+	b.anchor_top = 1.0
+	b.anchor_bottom = 1.0
+	b.offset_left = 12.0
+	b.offset_top = -64.0
+	b.offset_right = 64.0
+	b.offset_bottom = -12.0
+	b.grow_vertical = 0
 
 
 func _process(_dt: float) -> void:
@@ -305,6 +316,7 @@ func _attach_editor_panel() -> void:
 		_editor_logo.name = "A2GPreviewLogo"
 		_editor_logo.set_meta(&"a2g_owner", self)
 		_editor_logo.add_to_group(LOGO_GROUP)
+	_layout_logo(_editor_logo)
 	if _editor_logo.get_parent() != surface:
 		if _editor_logo.get_parent() != null:
 			_editor_logo.reparent(surface)
