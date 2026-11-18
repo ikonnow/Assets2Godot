@@ -9,7 +9,7 @@ anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 12.0
 offset_top = -352.0
-offset_right = 252.0
+offset_right = 276.0
 offset_bottom = -12.0
 grow_vertical = 0
 
@@ -31,10 +31,18 @@ text = "A2G PREVIEW"
 theme_override_constants/separation = 8
 theme_override_styles/separator = SubResource("StyleBoxLine_sep")
 
-[node name="SkyCheck" type="CheckBox" parent="Margin/VBox"]
+[node name="SkyChecks" type="HBoxContainer" parent="Margin/VBox"]
+
+[node name="SkyCheck" type="CheckBox" parent="Margin/VBox/SkyChecks"]
+size_flags_horizontal = 3
 button_pressed = true
 tooltip_text = "Sky backdrop on/off. Ambient light + reflections stay sky-sourced — use it to judge a dropped HDRI's light without the panorama."
 text = "Activate sky"
+
+[node name="LightCheck" type="CheckBox" parent="Margin/VBox/SkyChecks"]
+button_pressed = true
+tooltip_text = "Use the stage's neutral environment + sun for lighting. Uncheck to keep the edited scene's own lighting untouched — the stage then contributes nothing (no swapped sky, no second sun). Only offered while injected into another scene."
+text = "Preview lighting"
 
 [node name="SkyRow" type="HBoxContainer" parent="Margin/VBox"]
 

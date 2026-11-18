@@ -5,6 +5,15 @@ extends Node3D
 ## controls live twice: inspector exports (edited scenes don't run
 ## Control input) and the runtime overlay (F5).
 
+## Whether the stage's own sky environment + Sun light the viewport.
+## On (default): the preview env applies wherever the edited scene has
+## no WorldEnvironment of its own, and the Sun contributes a second
+## key light. Off — only useful injected — leaves the host scene's
+## lighting untouched: no swapped environment, no extra sun.
+@export var use_preview_lighting := true:
+	set(v):
+		use_preview_lighting = v
+		_apply_lighting()
 ## Sky backdrop on/off. Ambient + reflections stay SKY-sourced, so
 ## hiding the panorama changes only the backdrop, not the light —
 ## the lookdev trick for judging a dropped HDRI's contribution.
@@ -79,6 +88,9 @@ const HOST_RECHECK := 45
 ## The duplicate parked on the ground so UV edits never touch the
 ## shared or freshly dropped resource.
 var _ground_dup: StandardMaterial3D
+## The stage's Environment, kept across the use_preview_lighting
+## detach — nulling it off the WorldEnvironment would lose it.
+var _env: Environment
 ## Editor-side copy of the overlay, parked inside the 3D viewport's
 ## input surface — ownerless, so it never enters the edited scene.
 var _editor_panel: Control
@@ -98,6 +110,7 @@ const PANEL_SCENE_PATH := \
 
 
 func _ready() -> void:
+	_apply_lighting()
 	_apply_sky()
 	_apply_tiling()
 	_apply_zones()
@@ -298,6 +311,15 @@ func _attach_editor_panel() -> void:
 			continue
 		else:
 			l.queue_free()
+	# A panel parked under an older panel layout wires nothing — its
+	# controls moved. Re-instantiate it like a queued corpse instead
+	# of syncing structure that no longer exists.
+	if is_instance_valid(_editor_panel) \
+			and not _editor_panel.is_queued_for_deletion() \
+			and _editor_panel.get_node_or_null(
+				^"Margin/VBox/SkyChecks/LightCheck") == null:
+		_editor_panel.queue_free()
+		_editor_panel = null
 	# is_instance_valid alone is not enough: a foreign sweep outranks
 	# an inactive tab's panel via queue_free but cannot null this
 	# instance's member — queued is not yet freed, so re-instantiate.
@@ -339,11 +361,16 @@ func _wire_ui(vb: VBoxContainer) -> void:
 			var o = wr.get_ref()
 			if o != null:
 				o._set_ui_visible(on))
-	vb.get_node("SkyCheck").toggled.connect(
+	vb.get_node("SkyChecks/SkyCheck").toggled.connect(
 		func(on: bool) -> void:
 			var o = wr.get_ref()
 			if o != null:
 				o.activate_sky = on)
+	vb.get_node("SkyChecks/LightCheck").toggled.connect(
+		func(on: bool) -> void:
+			var o = wr.get_ref()
+			if o != null:
+				o.use_preview_lighting = on)
 	_bind_slider(vb.get_node("SkyRow/SkySlider"),
 		vb.get_node("SkyRow/SkyVal"), wr, &"sky_energy")
 	_bind_slider(vb.get_node("UvRow/UvSlider"),
@@ -475,14 +502,25 @@ func _zone_aabb(n: Node) -> Variant:
 func _sync_controls(vb: VBoxContainer) -> void:
 	_style_headlines(vb)
 	_sync_check(vb.get_node(^"Title"), _ui_visible)
-	_sync_check(vb.get_node(^"SkyCheck"), activate_sky)
+	var lc: CheckBox = vb.get_node_or_null(^"SkyChecks/LightCheck")
+	if lc != null:
+		_sync_check(lc, use_preview_lighting)
+		lc.visible = _is_injected()
+	var sc: CheckBox = vb.get_node_or_null(^"SkyChecks/SkyCheck")
+	if sc != null:
+		_sync_check(sc, activate_sky)
+		# Sky controls edit the stage env — dead weight while that env
+		# is detached, so they grey out instead of lying about reach.
+		sc.disabled = not use_preview_lighting
 	_sync_check(vb.get_node(^"ZoneGrid/ZnRefs"), show_references)
 	_sync_check(vb.get_node(^"ZoneGrid/ZnTargets"), show_targets)
 	_sync_check(vb.get_node(^"ZoneGrid/ZnScale"), show_scale)
 	_sync_check(vb.get_node(^"ZoneGrid/ZnStages"), show_stages)
 	_sync_check(vb.get_node(^"SoloCheck"), _solo_active)
-	var sky: HSlider = vb.get_node(^"SkyRow/SkySlider")
-	if not is_equal_approx(sky.value, sky_energy):
+	var sky: HSlider = vb.get_node_or_null(^"SkyRow/SkySlider")
+	if sky != null:
+		sky.editable = use_preview_lighting
+	if sky != null and not is_equal_approx(sky.value, sky_energy):
 		sky.set_value_no_signal(sky_energy)
 		vb.get_node(^"SkyRow/SkyVal").text = "×%.2f" % sky_energy
 	var uv: HSlider = vb.get_node(^"UvRow/UvSlider")
@@ -531,10 +569,42 @@ func _apply_ui_visible() -> void:
 		_editor_logo.visible = not _ui_visible
 
 
+## The Environment the stage owns — lazily lifted off the
+## WorldEnvironment so mutations (sky, energy, a dropped HDRI)
+## survive the use_preview_lighting detach.
+func _stage_env() -> Environment:
+	if _env == null and is_inside_tree():
+		_env = $WorldEnvironment.environment
+	return _env
+
+
+## Preview lighting off detaches the stage env (the host's own
+## WorldEnvironment — or the viewport default — takes over) and
+## switches the Sun off, so nothing the stage brought still lights
+## the host's meshes.
+func _apply_lighting() -> void:
+	if not is_inside_tree():
+		return
+	$WorldEnvironment.environment = _stage_env() \
+			if use_preview_lighting else null
+	$Sun.visible = use_preview_lighting
+	_resync_controls()
+
+
+## Only an injected stage has a foreign lighting context to defer
+## to — the open preview scene IS its own lighting, so the panel
+## hides the toggle there (and at runtime).
+func _is_injected() -> bool:
+	if not Engine.is_editor_hint() or not is_inside_tree():
+		return false
+	var root := EditorInterface.get_edited_scene_root()
+	return root != null and root != self
+
+
 func _apply_sky() -> void:
 	if not is_inside_tree():
 		return
-	var env: Environment = $WorldEnvironment.environment
+	var env: Environment = _stage_env()
 	if env == null:
 		return
 	env.background_mode = Environment.BG_SKY if activate_sky \
@@ -603,7 +673,9 @@ func _autoplace() -> void:
 			sm.panorama = tex
 			var sky := Sky.new()
 			sky.sky_material = sm
-			$WorldEnvironment.environment.sky = sky
+			var se := _stage_env()
+			if se != null:
+				se.sky = sky
 			activate_sky = true
 			_resync_controls()
 	_center_model(d["models"])
