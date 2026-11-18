@@ -1262,18 +1262,21 @@ func _is_material_file(path: String) -> bool:
 	return _mat_cache[path]
 
 
-## res:// loads through the importer; a just-downloaded file may not be
-## imported yet — Image covers .hdr/.exr directly.
+## Raw decode FIRST: the importer's default preset VRAM-compresses
+## panoramas into low-quality BC6H — banding + clipped highlights,
+## the JPEG look. A fresh .hdr/.exr decode keeps the full float
+## range the sky needs for IBL; the imported resource is fallback
+## only (e.g. a payload Image can't decode but an older import can).
 func _load_hdri(path: String) -> Texture2D:
-	if ResourceLoader.exists(path):
-		var res := ResourceLoader.load(path)
-		if res is Texture2D:
-			return res
 	var fs := path if not path.begins_with("res://") \
 		else ProjectSettings.globalize_path(path)
 	var img := Image.new()
 	if img.load(fs) == OK:
 		return ImageTexture.create_from_image(img)
+	if ResourceLoader.exists(path):
+		var res := ResourceLoader.load(path)
+		if res is Texture2D:
+			return res
 	return null
 
 

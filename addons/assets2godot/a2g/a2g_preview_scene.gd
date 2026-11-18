@@ -664,13 +664,16 @@ func _own_placed(inst: Node3D) -> void:
 	inst.owner = self
 
 
+## Raw decode first — same reason as _load_hdri in scene_drop: the
+## imported .hdr lands as low-quality BC6H, the raw file keeps the
+## panorama's full range for the sky.
 func _load_tex(path: String) -> Texture2D:
+	var img := Image.new()
+	if img.load(path) == OK:
+		return ImageTexture.create_from_image(img)
 	if ResourceLoader.exists(path):
 		return load(path) as Texture2D
-	var img := Image.new()
-	if img.load(path) != OK:
-		return null
-	return ImageTexture.create_from_image(img)
+	return null
 
 
 ## Every usable payload under the provider roots, by kind — real
