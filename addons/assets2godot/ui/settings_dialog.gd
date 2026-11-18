@@ -53,7 +53,7 @@ const PROVIDER_DEFAULTS := [
 ## Called by the menu once the plugin is known.
 func setup(new_plugin: EditorPlugin) -> void:
 	plugin = new_plugin
-	title = "Assets2Godot Settings"
+	title = "Assets to Godot Settings"
 	ok_button_text = "Close"
 	var edscale := EditorInterface.get_editor_scale()
 	_grid = GridContainer.new()
@@ -76,16 +76,16 @@ func setup(new_plugin: EditorPlugin) -> void:
 				else " Its catalog never fetches while off."])
 		_prov_checks[key] = check
 
-	_section("Assets2Godot panel", "The Assets2Godot panel itself — where it lives and how its tabs look.\nSaved in your editor settings. Also in Editor Settings → Assets2Godot.")
+	_section("Assets to Godot panel", "The A2G panel itself — where it lives and how its tabs look.\nSaved in your editor settings. Also in Editor Settings → assets2godot.")
 	_a2g_panel = _options(["Embedded (main screen)", "Docked"])
 	_a2g_panel.item_selected.connect(func(i): plugin.set_panel_mode(i))
-	_row("Assets2Godot panel", _a2g_panel, "Where the Assets2Godot panel opens.\nEmbedded keeps it inside its own main screen; Docked moves it into a native editor dock — the dock's ⋮ menu then offers dock position, floating and close, and the header button toggles the same setting.")
+	_row("Assets to Godot panel", _a2g_panel, "Where the A2G panel opens.\nEmbedded keeps it inside its own main screen; Docked moves it into a native editor dock — the dock's ⋮ menu then offers dock position, floating and close, and the header button toggles the same setting.")
 	_a2g_tablogos = CheckBox.new()
 	_a2g_tablogos.text = "Show provider logos in the main tabs"
 	_a2g_tablogos.toggled.connect(plugin.set_tab_logos)
 	_row("Provider logos", _a2g_tablogos, "Marks BlendKit, Polyhaven and ambientCG tabs with their provider logo.\nOff keeps the tabs text-only like the editor's own — the A2G menu's 'Provider logos in tabs' toggles the same setting.")
 
-	_section("Assets2Godot download defaults", "Which option drag & drop, the quick-download tile and the details popup preselect for texture-bearing providers.\nProvider rows override the global default; 'Provider default' inherits it.\nAlso in Editor Settings → Assets2Godot.")
+	_section("Assets to Godot download defaults", "Which option drag & drop, the quick-download tile and the details popup preselect for texture-bearing providers.\nProvider rows override the global default; 'Provider default' inherits it.\nAlso in Editor Settings → assets2godot.")
 	_tex_format = _options(["Auto (PNG when the asset has an opacity map)", "JPEG", "PNG"])
 	_tex_format.item_selected.connect(func(i): _set_es("assets2godot/texture_format", ["auto", "jpg", "png"][i]))
 	_row("Texture format", _tex_format, "Default map format for new texture downloads.\nAuto picks PNG when the asset ships an opacity map (alpha needs lossless edges) and JPEG otherwise — JPEG is ~3× smaller.\nPNG keeps mask edges lossless; JPEG still renders transparent through the alpha bake, just with softer/noisier cutout edges.")
@@ -142,12 +142,12 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_terrain_res.item_selected.connect(func(i): _set_es(AcgTerrain.SETTING_RES, int(_terrain_res.get_item_text(i))))
 	_row("Terrain grid", _terrain_res, "Vertex grid the heightmap decimates to for placed terrains — 257 keeps ~66k verts, higher costs memory for detail the heightmap may not have.")
 
-	_section("Assets2Godot Files", "The local file browser — how files list, how big thumbs render,\nhow much of the open scene it collects. Saved in your editor settings.\nAlso in Editor Settings → Assets2Godot.")
+	_section("Assets to Godot Files", "The local file browser — how files list, how big thumbs render,\nhow much of the open scene it collects. Saved in your editor settings.\nAlso in Editor Settings → assets2godot.")
 	_a2g_view = _options(["Grid", "List"])
 	# The browser's own persistence key — a2g_browser reads/writes
 	# browser_display_mode; anything else would be a dead setting.
 	_a2g_view.item_selected.connect(func(i): _set_es("assets2godot/browser_display_mode", i))
-	_row("Browser view", _a2g_view, "How the Assets2Godot file browser shows assets: gallery tiles or a compact list.\nThe browser toolbar's list/tile button changes the same setting.")
+	_row("Browser view", _a2g_view, "How the A2G file browser shows assets: gallery tiles or a compact list.\nThe browser toolbar's list/tile button changes the same setting.")
 	_a2g_thumb = _options(["128", "256", "512"])
 	_a2g_thumb.item_selected.connect(func(i): _set_es("assets2godot/thumb_size", [128, 256, 512][i]))
 	_row("Thumb size", _a2g_thumb, "Render size for thumbnails of files outside res://.\nApplies to thumbnails rendered after the change.")

@@ -55,7 +55,7 @@ func setup(new_plugin: EditorPlugin) -> void:
 	plugin = new_plugin
 	text = ""
 	theme_type_variation = "FlatButton"
-	tooltip_text = "Assets2Godot menu — provider tabs, fine-tuning, settings and updates."
+	tooltip_text = "A2G menu — provider tabs, fine-tuning, settings and updates."
 
 	_menu = PopupMenu.new()
 	add_child(_menu)
@@ -151,7 +151,7 @@ func _fill_menu() -> void:
 		_menu.set_item_tooltip(-1, "Show the %s tab.%s" % [p.get("title", key),
 			" The Client keeps running — the A2G index needs it." if daemon else \
 			" Its catalog never fetches while off."])
-	_menu.add_separator("ASSETS2GODOT FILES")
+	_menu.add_separator("ASSETS TO GODOT FILES")
 	for i in VIEW_MODES.size():
 		_view_menu.add_radio_check_item(VIEW_MODES[i], i)
 		_view_menu.set_item_checked(i, int(_es(SETTING_VIEW, 0)) == i)
@@ -179,7 +179,7 @@ func _fill_menu() -> void:
 	_menu.add_icon_check_item(get_theme_icon("File", "EditorIcons"), "Show all files", Item.SHOW_FILES)
 	_menu.set_item_checked(-1, bool(_es(SETTING_FILES, false)))
 	_menu.set_item_tooltip(-1, "List text files, configs and scripts in the Assets view too.")
-	_menu.add_separator("ASSETS2GODOT")
+	_menu.add_separator("ASSETS TO GODOT")
 	_menu.add_submenu_item("Texture format", _fmt_menu.name)
 	_menu.set_item_icon(-1, get_theme_icon("AssetStore", "EditorIcons"))
 	_menu.set_item_tooltip(-1, "Default format for texture downloads — Auto picks PNG for opacity maps. Per-provider overrides live in Settings.")
@@ -215,7 +215,7 @@ func _fill_menu() -> void:
 	_menu.add_icon_item(get_theme_icon("Debug", "EditorIcons"), "Report an Issue", Item.ISSUES)
 	_menu.set_item_tooltip(-1, plugin.ISSUES_URL)
 	_menu.add_separator()
-	_menu.add_item("Assets2Godot Plugin v%s" % plugin.get_addon_version(), Item.VERSION)
+	_menu.add_item("Assets to Godot Plugin v%s" % plugin.get_addon_version(), Item.VERSION)
 	_menu.set_item_disabled(-1, true)
 
 
