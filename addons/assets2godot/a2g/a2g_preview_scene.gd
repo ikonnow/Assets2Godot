@@ -260,6 +260,23 @@ func _wire_ui(vb: VBoxContainer) -> void:
 				o._random_place())
 
 
+## Section headlines: the caps text pairs with bold, letter-spaced,
+## slightly smaller glyphs — the label read of the A2G branding.
+## FontVariation wraps the theme's own default font so the look
+## follows whatever theme the editor/game is in.
+func _style_headlines(vb: VBoxContainer) -> void:
+	for name in ["Title", "LblZones", "LblPlace"]:
+		var l: Label = vb.get_node_or_null(name)
+		if l == null or l.has_theme_font_override(&"font"):
+			continue
+		var fv := FontVariation.new()
+		fv.base_font = l.get_theme_default_font()
+		fv.variation_embolden = 0.7
+		fv.spacing_glyph = 2
+		l.add_theme_font_override(&"font", fv)
+		l.add_theme_font_size_override(&"font_size", 13)
+
+
 func _bind_slider(s: HSlider, val: Label, wr: WeakRef, prop: StringName) -> void:
 	s.value_changed.connect(
 		func(v: float) -> void:
@@ -334,8 +351,10 @@ func _zone_aabb(n: Node) -> Variant:
 ## recreated panel (or an inspector edit while the panel is parked)
 ## leaves checkboxes showing the .tscn's default "pressed" instead of
 ## the real state. Only diverged controls are written so a mid-click
-## press is never disturbed.
+## press is never disturbed. Headline styling rides along too: an
+## adopted parked panel skips _wire_ui but still lands here.
 func _sync_controls(vb: VBoxContainer) -> void:
+	_style_headlines(vb)
 	_sync_check(vb.get_node(^"SkyCheck"), activate_sky)
 	_sync_check(vb.get_node(^"ZoneGrid/ZnRefs"), show_references)
 	_sync_check(vb.get_node(^"ZoneGrid/ZnTargets"), show_targets)
