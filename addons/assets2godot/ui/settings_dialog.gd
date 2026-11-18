@@ -1,7 +1,9 @@
 @tool
 extends AcceptDialog
-## Settings opened from the Blendkit menu. Changes apply right away. They are
-## also in Godot's Project Settings and Editor Settings under Blendkit.
+## Settings opened from the Blendkit or A2G menu. Changes apply right away.
+## Project rows save to project.godot under blendkit/*; Editor and
+## Assets2Godot rows save to editor settings under blendkit/* and
+## assets2godot/* — all visible in Project/Editor Settings too.
 
 const BlenderImport = preload("res://addons/assets2godot/blender_import.gd")
 const AcgApi = preload("res://addons/assets2godot/a2g/ambientcg_api.gd")
@@ -29,6 +31,9 @@ var _a2g_cap: OptionButton
 var _a2g_files: CheckBox
 var _a2g_panel: OptionButton
 var _a2g_tablogos: CheckBox
+# Provider tab switches — provider key → its CheckBox, same rows the
+# A2G menu offers above its fine-tuning shortcuts.
+var _prov_checks := {}
 var _player_path: LineEdit
 var _player_dialog: EditorFileDialog
 var _terrain_extent: SpinBox
@@ -48,7 +53,7 @@ const PROVIDER_DEFAULTS := [
 ## Called by the menu once the plugin is known.
 func setup(new_plugin: EditorPlugin) -> void:
 	plugin = new_plugin
-	title = "Blendkit Settings"
+	title = "Assets2Godot Settings"
 	ok_button_text = "Close"
 	var edscale := EditorInterface.get_editor_scale()
 	_grid = GridContainer.new()
@@ -77,7 +82,7 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_download_dir_dialog.access = EditorFileDialog.ACCESS_RESOURCES
 	_download_dir_dialog.dir_selected.connect(_on_download_dir_selected)
 	add_child(_download_dir_dialog)
-	_row("Download to", download_row, "Directory into which the plugin downloads the assets.")
+	_row("BlendKit download dir", download_row, "Directory BlendKit downloads land in (project setting, shared with the team).\nPolyhaven and ambientCG pick their own roots in their tab's folder button.")
 	_download_dir.tooltip_text = download_row.tooltip_text
 	_blend_import = _dialog_button()
 	_blend_import.pressed.connect(func():
@@ -86,7 +91,7 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_row("Blender Import", _blend_import, "Whether Godot imports .blend files, and the Blender it imports them with.\nClick to change them.")
 	_model_format = _options(plugin.MODEL_FORMATS.map(func(f): return f[1]))
 	_model_format.item_selected.connect(func(i): plugin.set_model_format(plugin.MODEL_FORMATS[i][0]))
-	_row("Model Format", _model_format, "Blender (.blend) downloads .blend files at the selected Resolution, which Godot imports only through Blender.\nglTF (.glb) downloads .glb files exported by Blendkit, which Godot imports directly. Only some models have one, so the Blendkit tab shows only those, and other models fall back to .blend at the selected Resolution. Experimental.")
+	_row("Model Format", _model_format, "Blender (.blend) downloads .blend files at the selected Resolution, which Godot imports only through Blender.\nglTF (.glb) downloads .glb files exported by Blendkit, which Godot imports directly. Only some models have one, so the Blendkit tab shows only those, and other models fall back to .blend at the selected Resolution.\nExperimental — the bundled Client can crash on these downloads.")
 	_resolution = _options(plugin.RESOLUTIONS.map(func(r): return r[1]))
 	_resolution.item_selected.connect(func(i): plugin.set_resolution(plugin.RESOLUTIONS[i][0]))
 	_row("Resolution", _resolution, "Texture resolution for .blend files, also used when glTF is unavailable. Auto downloads 2K.")
@@ -101,6 +106,20 @@ func setup(new_plugin: EditorPlugin) -> void:
 	_log_level = _options(plugin.LogLevel.keys())
 	_log_level.item_selected.connect(plugin.set_log_level)
 	_row("Log Level", _log_level, "Log level for the plugin's output.")
+
+	_section("Providers", "Which provider tabs the panel shows.\nSaved in your editor settings — the A2G menu's check rows toggle the same settings.")
+	for p in plugin.PROVIDERS:
+		var key := str(p.get("key", ""))
+		var title_p := str(p.get("title", key))
+		var check := CheckBox.new()
+		check.text = "Show the %s tab" % title_p
+		# .bind() freezes the key — a lambda's capture of the loop var
+		# would alias every row to the last provider.
+		check.toggled.connect(_on_provider_enabled.bind(key))
+		_row(title_p, check, "Show the %s tab.%s" % [title_p,
+			" The Client keeps running — the A2G index needs it." if bool(p.get("daemon", false)) \
+				else " Its catalog never fetches while off."])
+		_prov_checks[key] = check
 
 	_section("Assets2Godot", "Local index browser and the unified Assets tab.\nSaved in your editor settings and applies to all your projects.\nAlso in Editor Settings → Assets2Godot.")
 	_a2g_view = _options(["Grid", "List"])
@@ -167,9 +186,12 @@ func setup(new_plugin: EditorPlugin) -> void:
 		_player_path.text = p
 		_apply_player_path())
 	add_child(_player_dialog)
+
+	_section("Tools", "External helpers optional features integrate with.\nSaved in your editor settings.")
 	_row("Substance Player", player_row, "Substance 3D Player location for ambientCG .sbsar assets.\nEmpty = auto-detect Creative Cloud / legacy installs (shown as placeholder).\nThe details popup's 'Open in Substance Player' works through the file association either way.")
 	_player_path.tooltip_text = player_row.tooltip_text
 
+	_section("Terrain defaults", "Values baked into ambientCG terrains at placement —\nexisting meshes keep what they were placed with.")
 	_terrain_extent = _spin(10, 50000, 10, "m")
 	_terrain_extent.value_changed.connect(func(v): _set_es(AcgTerrain.SETTING_EXTENT, v))
 	_row("Terrain extent", _terrain_extent, "XZ footprint baked into placed ambientCG terrains when no sibling OBJ gives real meters.\nAffects the next placement, not existing meshes.")
@@ -206,6 +228,8 @@ func _load() -> void:
 	_a2g_files.button_pressed = bool(_es("assets2godot/show_all_files", false))
 	_a2g_panel.select(clampi(plugin.panel_mode(), 0, 1))
 	_a2g_tablogos.button_pressed = plugin.tab_logos_enabled()
+	for key in _prov_checks:
+		_prov_checks[key].set_pressed_no_signal(plugin.provider_enabled(key))
 	_load_player_path()
 	_terrain_extent.set_value_no_signal(float(_es(AcgTerrain.SETTING_EXTENT, AcgTerrain.DEFAULT_EXTENT_M)))
 	_terrain_relief.set_value_no_signal(float(_es(AcgTerrain.SETTING_RELIEF, AcgTerrain.DEFAULT_RELIEF_M)))
@@ -217,6 +241,12 @@ func _load() -> void:
 			str(_es("assets2godot/providers/%s_texture_format" % key, "default")))))
 		_res_rows[key].select(maxi(0, ([""] + Array(p["res"])).find(
 			str(_es("assets2godot/providers/%s_resolution" % key, "")))))
+
+
+## Provider tab switches route through the plugin — the same entry the
+## A2G menu's check rows use, so tab visibility applies immediately.
+func _on_provider_enabled(on: bool, key: String) -> void:
+	plugin.set_provider_enabled(key, on)
 
 
 ## Reads/writes the assets2godot/* editor settings — these rows have no
